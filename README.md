@@ -22,7 +22,7 @@
 
 ## 상태
 
-**seed / 정초.** 정체성·목적·기능·잠긴 결정은 [`docs/VISION.md`](docs/VISION.md) 참조. MVP·스키마·캡처/회상 메커니즘·DB 택일·통합 형태는 자체 deep-interview로 결정한다.
+**seed / 정초.** 처음 여는 사람은 [`START_HERE.md`](START_HERE.md)부터 — 시작 경로·출처·첫 행동을 담은 지도다. 정체성·목적·기능·잠긴 결정은 [`docs/VISION.md`](docs/VISION.md) 참조. MVP·스키마·캡처/회상 메커니즘·DB 택일·통합 형태는 자체 deep-interview로 결정한다.
 
 ## 관계
 
