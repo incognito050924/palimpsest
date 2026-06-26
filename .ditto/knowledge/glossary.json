@@ -1,0 +1,31 @@
+{
+  "schema_version": "0.1.0",
+  "project_name": "palimpsest",
+  "updated_at": "2026-06-26T00:00:00.000Z",
+  "entries": [
+    {
+      "term": "palimpsest",
+      "definition": "코드 표면 아래 의사결정·의도 층을 다시 읽게 하는 Knowledge Graph 기반 장기기억·지식 큐레이터.",
+      "status": "agreed",
+      "agreed_at": "2026-06-26T00:00:00.000Z"
+    },
+    {
+      "term": "Knowledge Graph (본체)",
+      "definition": "palimpsest의 핵심 표현 — 엔티티 + 관계 + 온톨로지 + provenance + 신선도. 모든 엔티티가 1급.",
+      "status": "agreed",
+      "agreed_at": "2026-06-26T00:00:00.000Z"
+    },
+    {
+      "term": "GraphRAG (회상층)",
+      "definition": "KG 위 그래프 탐색 + 벡터 + LLM 합성 회상·합성층. 출력은 근거 결박(출처 + gap + confidence).",
+      "status": "agreed",
+      "agreed_at": "2026-06-26T00:00:00.000Z"
+    },
+    {
+      "term": "design-risk slice",
+      "definition": "v1 첫 수직 슬라이스 — 브랜치 간 설계위험 감지(팀원의 최근 push가 내 현재 설계에 위험인지 KG + GraphRAG로 근거 붙여 surface).",
+      "status": "agreed",
+      "agreed_at": "2026-06-26T00:00:00.000Z"
+    }
+  ]
+}

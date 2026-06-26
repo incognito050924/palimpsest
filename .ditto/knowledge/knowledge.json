@@ -1,0 +1,10 @@
+{
+  "schema_version": "0.1.0",
+  "project_name": "palimpsest",
+  "updated_at": "2026-06-26T00:00:00.000Z",
+  "context_path": ".ditto/knowledge/CONTEXT.md",
+  "glossary_path": ".ditto/knowledge/glossary.json",
+  "patterns": [],
+  "learnings": [],
+  "projected_to_claude_md": true
+}

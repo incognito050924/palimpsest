@@ -1,0 +1,7 @@
+# DITTO per-developer runtime — volatile, not for version control.
+# Managed by `ditto init`; safe to edit.
+# Tier ③ per-developer (gitignored): everything under local/.
+local/
+# Tier ② project-global (git-shared): knowledge/ and agents/ stay tracked.
+!knowledge/
+!agents/
