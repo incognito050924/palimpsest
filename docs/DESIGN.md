@@ -25,6 +25,16 @@
 - 🔶 **신선도(2축, 제안):** ① **코드-결박 신선도** — 지식이 가리키는 코드 위치·심볼이 현재 커밋에 살아있나 · ② **결정-계보 신선도** — 이 지식이 더 최신 결정에 의해 supersede 됐나(이력은 보존하되 "현재 live" 판정). VISION의 "커밋 해시 기반 2축 신선도"를 이렇게 구체화 제안.
 - ⬜ **미결:** 정확한 2축 정의·계산 · 기억의 입도(granularity) · 임베딩 부착 대상과 차원 · 온톨로지 진화/버전 전략 · `Risk`를 노드로 둘지 관계로 둘지.
 
+### 2-bis. node/edge 스키마 제안 *(연구 반영, 2026-06-30 · 🔶 medium confidence)*
+
+1차 자료 종합 — Glean(pre-compute fact)·HugRAG(unified edge space)·CPG/Joern(type-label overlay)·Graphiti(bi-temporal/Episode). 근거·검증(23 confirmed/2 refuted)·출처 전체: [`docs/research/precompute-hugrag-kg.md`](research/precompute-hugrag-kg.md). **충돌 검토: ADR-20260626(KG 본체·GraphRAG 회상·전이력 보존)과 충돌 없음** — 오히려 각 시스템이 우리 모델 조각을 실증.
+
+- 🔶 **노드 — 정적층(CPG):** `Repo` · `Module/File` · `Type/Class` · `Method/Function` · `Variable/Local` · `CallSite`. **의미층:** `Summary/CommunityReport` · `DesignDecision/ADR` · `Risk/Finding` · `Episode/SourceCommit`.
+- 🔶 **엣지 — 결정론적 구조(`edge_kind=deterministic`, git projection 재생성):** `CONTAINS` · `CALLS` · `REACHING_DEF`(DATAFLOW) · `IMPORTS` · `INHERITS` · `REF`. **생성형 추론(`edge_kind=inferred`, LLM 생성 + confidence 게이팅):** `SUMMARIZES` · `CAUSALLY_RELATES` · `ADDRESSES_RISK` · `DECIDES` · `RELATES_TO`.
+- 🔶 **정적/생성형 분리(세탁 금지):** ① 별도 edge label + ② 모든 엣지에 `edge_kind = deterministic|inferred` 속성 — 2중 표시로 출처·신뢰 혼동 차단.
+- 🔶 **provenance·2축 신선도 = 엣지 속성(Graphiti 패턴):** `source`=Episode/commit SHA(provenance) · `valid_from`/`valid_to`=결정-계보 신선도(삭제 대신 invalidate=전이력 보존) · `code_bound_at`=코드-결박 신선도(연결 심볼의 마지막 git 변경) · inferred일 때 `generator`/`model`/`confidence`/`created_at`.
+- ⚠ **제안 한계:** 노드/엣지·속성 *이름*은 제안이며 **v1 design-risk 스파이크로 검증 후 ADR 승격**. HugRAG의 "세 엣지 = 정적/생성형 1:1"은 검증서 기각(실제 2:1) — 아이디어만 차용하고 매핑은 직접 설계.
+
 ## 3. 아키텍처
 
 - ✅ **git = SoT.** KG는 재구축 가능한 projection, 벡터는 보완. (ADR-20260626 #2, 잠긴 결정 #2)
@@ -74,7 +84,8 @@
 
 ## 7. 미결 · 검증 대상
 
-- ⬜ **DB substrate** — 🔶 Neo4j Community 1차 + Memgraph 폴백(문서 근거), Postgres+AGE 제외. **실측 미결**(스키마+코퍼스 후 마이크로벤치). → `docs/spikes/db-substrate-spike.md` (`wi_2606264gw`).
+- ⬜ **DB substrate** — 🔶 Neo4j Community 1차 + Memgraph 폴백(문서 근거), Postgres+AGE 제외. **Neo4j 도입 방향 확정**(스파이크 권고와 일치), 단 성능·메모리·재구축 **실측 미결**(스키마+코퍼스 후 마이크로벤치)이라 ADR 승격은 실측 후. → `docs/spikes/db-substrate-spike.md` (`wi_2606264gw`).
+- ⬜ **node/edge 설계 미결(연구 §6)** — derived/inferred 엣지 생성 메커니즘(Datalog식 파생 vs Cypher+앱코드) · LLM 추론 엣지 precision 가드레일(거짓 인과 폭증 억제) · CPG intra-procedural data-flow를 cross-branch로 확장 · 코드-결박 신선도 갱신 단위·stale 판정 트리거. → `docs/research/precompute-hugrag-kg.md` (`§2-bis`).
 - ⬜ **스키마 상세** — §2 엔티티/관계/신선도 2축의 구체 정의.
 - ⬜ **임베딩 설계** — 부착 대상·차원·하이브리드 검색 구성.
 - ⬜ **데모 코퍼스** — 두 브랜치에 실제 설계 의존성 있는 repo(ditto / 최소 fixture / 타 프로젝트).
@@ -84,7 +95,7 @@
 ## 8. ADR 인덱스 (권위)
 
 - ✅ `ADR-20260626-foundational-architecture` — KG 본체 + GraphRAG 회상층, 전 이력 보존, 자동 캡처. (active)
-- 🔶 **ADR 후보(결정 굳으면 승격):** DB substrate 택일 · 온톨로지/스키마 · 신선도 2축 정의 · 노출 형태.
+- 🔶 **ADR 후보(결정 굳으면 승격):** DB substrate 택일(Neo4j — 실측 후) · 온톨로지/스키마(§2-bis node/edge·`edge_kind` 정적/생성형 분리 — v1 스파이크 후) · 신선도 2축 정의(`code_bound_at`/`valid_from·valid_to`) · 노출 형태.
 
 ---
 

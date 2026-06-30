@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1.0",
   "project_name": "palimpsest",
-  "updated_at": "2026-06-26T00:00:00.000Z",
+  "updated_at": "2026-06-30T00:00:00.000Z",
   "entries": [
     {
       "term": "palimpsest",
@@ -26,6 +26,24 @@
       "definition": "v1 첫 수직 슬라이스 — 브랜치 간 설계위험 감지(팀원의 최근 push가 내 현재 설계에 위험인지 KG + GraphRAG로 근거 붙여 surface).",
       "status": "agreed",
       "agreed_at": "2026-06-26T00:00:00.000Z"
+    },
+    {
+      "term": "Code Property Graph (CPG)",
+      "definition": "코드 정적분석을 담는 language-agnostic property graph 표현 — 노드는 타입 가진 program construct + 속성, 관계는 라벨 붙은 방향 엣지, 같은 노드 쌍 간 다중 엣지 허용(AST+CFG+PDG overlay). palimpsest 정적층 온톨로지의 출발점. 출처 cpg.joern.io.",
+      "status": "agreed",
+      "agreed_at": "2026-06-30T00:00:00.000Z"
+    },
+    {
+      "term": "edge_kind",
+      "definition": "KG 엣지의 출처·신뢰를 구분하는 1급 분리축 — deterministic(코드 정적분석에서 결정론적으로 재생성되는 구조 엣지) vs inferred(LLM이 생성하고 confidence로 게이팅되는 추론 엣지). 정적∪생성형을 한 그래프에 두되 '세탁 금지'를 스키마로 강제.",
+      "status": "agreed",
+      "agreed_at": "2026-06-30T00:00:00.000Z"
+    },
+    {
+      "term": "Episode (provenance 노드)",
+      "definition": "ingest된 원시 데이터(= git commit / SourceCommit)를 가리키는 ground-truth 노드. 모든 inferred 엣지가 역참조되는 provenance 앵커(git=SoT와 정합). 출처 Graphiti.",
+      "status": "agreed",
+      "agreed_at": "2026-06-30T00:00:00.000Z"
     }
   ]
 }
