@@ -6,13 +6,15 @@
 
 **palimpsest** = 한 프로젝트의 라이프사이클(의사결정 → 코드 반영, 코드 뒤에 비치는 기획·설계·구현 의도와 관계)을 투명하게 드러내는 **장기기억·지식 큐레이터**.
 
-현재 상태: **seed / 정초.** 정체성·방향·잠긴 결정만 박혀 있고 **런타임 동작은 아직 없다**(의존성·코드 없음).
+현재 상태: **seed / 정초.** 정체성·방향·잠긴 결정 + 정초 아키텍처(`ADR-20260626`)·v1 슬라이스가 박혔고 **런타임 동작은 아직 없다**(의존성·코드 없음).
 
 ## 읽는 순서
 
 1. `README.md` — 한눈 요약
-2. `docs/VISION.md` — **정초 SoT.** 이름·목적·5기능·잠긴 결정·스택·다음 단계
-3. 이 문서(`START_HERE.md`) — 시작 경로 · 출처 · 첫 행동
+2. `docs/VISION.md` — 정체성·목적·5기능·잠긴 결정·스택 (배경 지도 — 권위는 아래 ADR·intent.json)
+3. `docs/DESIGN.md` — 살아있는 설계 지도(온톨로지·아키텍처·로드맵·미결)
+4. `.ditto/knowledge/adr/ADR-20260626-foundational-architecture.md` — **권위 있는 정초 결정** (KG 본체 + GraphRAG 회상)
+5. 이 문서(`START_HERE.md`) — 시작 경로 · 출처 · 첫 행동
 
 ## 이미 잠긴 것 (재론의 대상 아님)
 
@@ -27,12 +29,13 @@
 
 ## 아직 열린 것 = 첫 할 일
 
-palimpsest 자체 deep-interview로 결정할 6항목(`docs/VISION.md` §다음 단계):
-MVP(개인 vs 조직) · 스키마(엔티티·관계·provenance·신선도) · 캡처/회상 메커니즘 · DB 택일 스파이크 · MCP vs ditto-pluggable · 벡터/RAG 설계.
+**정초 1회차 deep-interview·DB 스파이크 완료(2026-06-26).** 확정된 것:
 
-**권장 첫 행동 두 가지(병행):**
-1. **DB 택일 스파이크** — Neo4j vs Memgraph vs PostgreSQL(pgvector + Apache AGE). git=SoT라 DB는 교체 가능한 투영이지만, 기반이 되는 선택이라 실측으로 먼저 좁힌다(GraphRAG를 단일 DB에서 돌릴 수 있는가가 1차 기준).
-2. **MVP 범위 deep-interview** — 개인부터 vs 팀/조직부터. 5기능 중 무엇을 첫 슬라이스로 세울지.
+- KG 본체 + GraphRAG 회상, 모든 엔티티 1급, 전이력 보존, 자동 캡처 → `ADR-20260626`(권위)
+- v1 첫 슬라이스 = **브랜치 간 design-risk 감지** → `intent.json`(wi_2606263sn)
+- DB는 **Neo4j 1차 + Memgraph 폴백** → `docs/spikes/db-substrate-spike.md`(wi_2606264gw)
+
+**다음 = v1 design-risk slice 구현.** 남은 미결은 `docs/DESIGN.md` §7에 있다 — node/edge 스키마(§2-bis 제안) · 스키마 상세 · 임베딩 · 데모 코퍼스 · 성능 · 노출 형태(MCP/스킬/pluggable). 3개념(Meta Glean·HugRAG·CPG/Graphiti) 연구 근거: `docs/research/precompute-hugrag-kg.md`.
 
 ## 출처 / 배경 (외부 의존 — 읽어둘 것)
 
@@ -47,7 +50,7 @@ palimpsest는 **ditto**라는 별도 repo에서 갈라져 나왔다. 정초의 �
 
 ## 작업 방식
 
-- **git = SoT.** 되돌리기 어려운 결정은 palimpsest 자체 ADR로 기록한다(첫 ADR 후보 = 스택 확정 또는 DB 택일).
+- **git = SoT.** 되돌리기 어려운 결정은 palimpsest 자체 ADR로 기록한다(첫 ADR = `ADR-20260626` 정초 아키텍처. DB 택일·node/edge 스키마는 v1 스파이크 검증 후 승격 예정).
 - **근거 결박.** 모든 주장·합성 출력은 출처 + gap을 명시하고, 확신 없는 것을 사실로 굳히지 않는다 — 이 프로젝트의 존재 이유(할루시네이션 최소화) 그 자체다.
 - 의존성은 첫 스파이크에서 추가한다(`pyproject.toml`의 `dependencies`는 현재 의도적으로 비어 있음).
 
@@ -56,7 +59,12 @@ palimpsest는 **ditto**라는 별도 repo에서 갈라져 나왔다. 정초의 �
 ```
 README.md                  한눈 요약
 START_HERE.md              이 지도
-docs/VISION.md             정초 SoT (이름·목적·5기능·잠긴 결정·스택·다음 단계)
+docs/VISION.md             정체성·목적·잠긴 결정 (배경 지도)
+docs/DESIGN.md             살아있는 설계 지도 (온톨로지·아키텍처·로드맵·미결)
+docs/spikes/               기술 스파이크 (db-substrate-spike.md)
+docs/research/             연구보고서 (precompute-hugrag-kg.md)
+.ditto/knowledge/          권위 결정·용어 (adr/ · glossary.json · CONTEXT.md)
+AGENTS.md · CLAUDE.md       에이전트 행동 헌장 + ditto 지식 projection
 pyproject.toml             패키지 메타 (deps 비어 있음 — 첫 스파이크에서 채움)
 src/palimpsest/__init__.py 빈 패키지 (런타임 없음)
 .gitignore
