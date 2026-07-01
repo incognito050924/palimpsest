@@ -5,6 +5,7 @@
 - 검증 결과: **23 confirmed · 2 refuted · 0 unverified.**
 - 작성: deep-research 워크플로(104 에이전트). 날짜 2026-06-30.
 - 위상: **조사 산출물(연구 리포트)**. 결정이 아니라 설계 보강의 근거 입력. 권위는 코드·ADR이지 이 문서가 아니다.
+- **확장 라운드(§7, 2026-07-01)**: "Meta의 tacit-knowledge pre-compute(five-questions)" 질문에서 출발한 2차 조사. §1~§6의 3표 적대검증과 달리 **fan-out 웹검색 + 서브에이전트 종합**이며 검증 위상이 낮다 — §7 안에서 항목별로 **자기보고 / 비전-무평가 / 실측**을 구분 표기했다.
 
 ---
 
@@ -129,6 +130,73 @@
 
 ---
 
+## 7. Tacit-knowledge 계열 — Meta five-questions·CDT·Lore·Heidelberg·Confucius (2026-07-01 확장 라운드)
+
+> **위상·검증 경고**: 이 절은 §1~§6과 **다른 조사 라운드**다. 방법은 6각도 fan-out 웹검색 → 3개 축(Meta 시스템·학술·상용)을 서브에이전트로 위임·종합. **§1~§6의 3표 적대검증을 거치지 않았다.** 그래서 주장마다 검증 위상을 **[자기보고] / [비전·무평가] / [실측] / [2차·의견]**으로 표기한다. 결론이 아니라 근거 입력이라는 문서 전체 위상(권위=코드·ADR)은 그대로다.
+>
+> **동기**: §1의 Glean은 "정적 사실 pre-compute"였는데, 사용자가 물은 Meta의 *tacit-knowledge* pre-compute는 **별개 시스템**(아래 7.1)이다. §4의 의미층 노드·추론 엣지 설계에 직접 닿는 계열이라 확장 조사했다.
+
+### 7.1 Meta "five questions" tribal-knowledge 시스템 [자기보고 중심]
+
+§1 Glean과 **다른 Meta 시스템**이다(Glean=fact 색인 DB / 이건 LLM 에이전트 스웜이 암묵지를 요약). 출처: engineering.fb.com/2026/04/06/developer-tools/how-meta-used-ai-to-map-tribal-knowledge-in-large-scale-data-pipelines/
+
+- **five questions (verbatim)** — module analyst가 파일마다 답하는 5개: ① "What does this module configure?" ② "common modification patterns?" ③ "non-obvious patterns that cause **build** failures?" ④ "cross-module dependencies?" ⑤ "tribal knowledge buried in code comments?" (Meta는 ⑤가 가장 깊은 학습을 냈다고 — 숨은 명명 규칙, append-only 식별자 규칙.)
+- **context 파일 = "compass, not encyclopedia"**: 25~35줄(~1,000토큰), **4개 고정 섹션** — (1) Quick Commands (2) Key Files(실제 봐야 할 3~5개) (3) Non-Obvious patterns (4) See Also. 59개 전체가 컨텍스트의 **0.1% 미만**, **opt-in 로딩**, 품질 게이팅.
+- **에이전트 스웜 파이프라인(50+, 9단계)**: explorer 2 → module analyst 11(5질문) → writer 2 → critic 10+(3라운드) → fixer 4 → upgrader 8 → prompt tester 3 → gap-filler 4 → final critic 3.
+- **결과** [자기보고]: 커버리지 5%→100%, 파일 ~50→4,100+(4 repo·3 언어), 비자명 패턴 0→50+, critic 품질 3.65→4.20. 헤드라인 **"태스크당 tool 호출·토큰 ~40%↓"**은 **n=6 preliminary 테스트, 독립검증 없음** — techjacksolutions도 "벤치마크가 아니라 방향 신호"로 못 박음(techjacksolutions.com/ai-brief/the-context-problem-in-enterprise-agentic-ai-what-metas-trib/). 파일경로는 zero-hallucination 검증되나 **의미(semantic) 정확성은 무보장**.
+- **자가유지**: 몇 주마다 자동 job이 경로검증·커버리지갭탐지·critic 재실행·stale 참조 자동수정. *"Context that decays is worse than no context at all."* 단 새 tribal knowledge 탐지는 **미구현(future work)**.
+- ⚠ **Meta 자인 반대근거(중요)**: 학술 연구에서 AI 생성 context 파일이 Django·matplotlib 같은 유명 OSS에서 **에이전트 성공률을 오히려 떨어뜨렸다**. Meta 반론은 "그 repo는 pretraining에 있고 우리 건 학습데이터에 없는 사유 config-as-code" — 자기정당화라 회의적으로 볼 것. → 우리 추론 엣지도 **오히려 해가 될 수 있는 fail-case가 실재**(§6-2 강화).
+- **의미-격차 비판**(jprevanth, Medium): *"what it configures ≠ what it means"* — Meta는 무엇을 설정하는지는 문서화했지만 **비즈니스/의미**는 여전히 격차. (벤더 홍보는 discount, 논지만 취함.)
+
+### 7.2 학술 계열 — 같은 진단, 다른 무게 [위상 혼재]
+
+다섯 논문 전부 진단 동일: **why(설계 근거·제약·기각 대안·책임 배분)는 코드 밖·시간에 얽혀 LLM이 요청 시 복원 못 함.** 처방이 갈린다.
+
+| 논문 | 소속 | 위상 | 그래프 | provenance | freshness | 우리에게 |
+|---|---|---|---|---|---|---|
+| **Code Digital Twin (CDT)** | Fudan | **비전·평가 0** | ✅ 타입드 | 1급 엣지 | change-event 증분 재추출 | ★ 온톨로지 직접 선례 |
+| **Lore** | 독립 | 제안만 | ❌ commit 원자 | commit hash 결박(공짜) | 불변성=anti-drift + `stale` 플래그 | 값싼 provenance 대안 |
+| **Context Engineering(AGENTS.md 연구)** | Heidelberg | **실측** | ❌ | ❌ | 실측: 50% 파일 생성 후 무수정 | 경험적 경고 |
+| **Confucius Code Agent** | **Meta+Harvard** | **유일 평가**(SWE-Bench 74.6%) | ❌ Markdown 트리 | ❌ | drift 탐지 없음 | 런타임 메모≠설계 그래프 |
+
+- **CDT [비전·평가 0]** (arxiv.org/abs/2503.07967; 근접 중복본 2510.16395는 **철회됨**) — **§4가 "HugRAG에서 아이디어만 빌리고 매핑은 직접 설계"라 미뤄둔 부분을 CDT가 구체적 2층 온톨로지로 이미 제안**. **물리층**(결정론·정적분석): `contains, defines, imports, calls, reads-writes, depends-on`. **개념층**(LLM 추론) 노드: Domain Concepts / Functionalities·Responsibilities / Rationales·Constraints. **타입드 관계 어휘**: `operationalized-by, decomposes-to, has-responsibility, assigned-to, constrained-by, justified-by`. provenance는 버전·commit·PR·issue로 1급. freshness는 change-event 증분 재추출 + link-integrity 검증. **단 구현·평가 전무 — 온톨로지는 빌리되 검증은 우리 몫.**
+- **Lore [제안만]** (arxiv.org/abs/2603.15566) — 정반대 극(near-zero 인프라). commit trailer 9종(`Constraint / Rejected / Confidence / Scope-risk / Reversibility / Directive / Tested / Related`)으로 "Decision Shadow"를 commit에 원자 결박. **불변성으로 drift 원천봉쇄** — 우리 "git=SoT, Episode=commit"의 극단적 버전. cross-record 링크는 `Related:`뿐.
+- **Heidelberg [실측·유일]** (arxiv.org/abs/2510.21413) — GitHub 10,000 repo 마이닝. AGENTS.md/CLAUDE.md 채택 **5%**, **관찰된 14개 정보 카테고리**(컨벤션·기여가이드·아키텍처·빌드·테스트·기술스택·트러블슈팅·패턴·보안 등 = Meta 5질문의 확장 체크리스트), 5개 서술 스타일. **파일의 50%가 생성 후 한 번도 갱신 안 됨** = "write-once context 파일은 실제로 썩는다"는 경험 증거.
+- **Confucius [유일 평가]** (arxiv.org/abs/2512.10398, Meta+Harvard) — SWE-Bench-Verified 74.6%·Pro 54.3%(논문 자기보고, 미재현). 단 **정적 index·설계 그래프를 안 만든다** — planner 기반 계층 working-memory + note-taking 에이전트가 실행궤적을 Markdown 노트로 distill(성공전략+실패모드). 지식이 **행동·경험적**이지 설계-근거가 아님, **staleness 메커니즘 없음**.
+
+### 7.3 상용 지형 [2차·문서화 능력]
+
+| 도구 | 카테고리 | 생성 | tacit vs 구조 | freshness |
+|---|---|---|---|---|
+| Anthropic **CLAUDE.md** 가이드 (claude.com/blog/using-claude-md-files) | 7섹션(요약·디렉토리·컨벤션·테스트·명령·의존성·커스텀툴), "10분 설명거리"·반복 명령 강조 | `/init` 1패스 또는 수동 | 도메인 패턴 권장하나 대체로 구조 | **크기한도·갱신지침 없음** |
+| **repowise** | 의존성·소유권·hotspot·co-change·bus factor·ADR | 연속 | 구조+위험신호 | ✅ freshness 스코어링 |
+| DeepWiki / Cursor / Greptile / Mintlify | overview·임베딩·코드그래프·API문서 | 1패스~연속 | 대부분 구조 | 대체로 약함 |
+
+요지: 상용은 **구조적 사실**(디렉토리·의존성·임베딩)에 강하고 **비자명 tacit 지식**(gotcha·근거·"바꾸기 전 알아야 할 것")은 Meta 5질문·CDT·Lore가 앞선다. **design-decision provenance·cross-branch 위험**을 잡는 도구는 아직 없음 — 우리가 겨냥한 지점.
+
+### 7.4 합의 vs 갈림
+
+- **합의(5/5)**: ①why는 코드 밖·시간에 얽힘 ②scope별 curated·distilled 산출물을 task-time 로드가 공통 형태 ③raw dump보다 distillation(토큰 예산) ④long-term 지식공학 ↔ task-time 컨텍스트공학 분리(CDT 명시).
+- **갈림(우리에게 중요한 3축)**: ①**그래프 vs 평면** — 타입드 그래프는 CDT 하나뿐(우리 노선). ②**provenance** — 평면 context 파일엔 거의 없음, CDT=1급 엣지·Lore=commit-atomic 공짜. ③**freshness** — 평면 파일의 최대 약점(Heidelberg 실측이 증명), CDT·Lore·Meta가 각자 다른 답. **우리 2축 신선도(code-bound + 결정-계보)는 어느 선례에도 없는 고유 축**(§6-4와 일치).
+
+### 7.5 palimpsest 접목
+
+1. **§4.1 의미층 노드(`Summary/CommunityReport`)의 실증·스키마 후보** — Meta context 파일 = 그 노드의 배포 사례. 채울 스키마 후보 = **Meta 5질문 + Heidelberg 14 카테고리**.
+2. **§4.2 엣지 분리의 온톨로지 보강** — HugRAG(2:1 매핑이라 "직접 설계" 필요)보다 **CDT 2층 모델이 더 직접적 선례**. `justified-by / constrained-by / has-responsibility / decomposes-to`를 inferred 엣지 어휘 출발점으로.
+3. **§6-2(추론 엣지 precision) 외부 증거** — Meta는 path만 검증·의미 무검증, jprevanth의 의미-격차 비판, Meta 자인 "AI context가 유명 OSS 성공률↓" fail-case가 모두 **inferred 엣지가 오히려 해가 될 수 있음**을 뒷받침 → 가드레일 필요성 강화.
+4. **§6-4(코드-결박 신선도) 외부 증거** — Heidelberg 실측(50% 무수정)이 "write-once는 썩는다"를 증명 → 우리 freshness 축이 차별점인 이유.
+
+### 7.6 증거 등급 요약 (정직하게)
+
+- Meta 40% = **n=6 preliminary 자기보고** — 가설이지 벤치마크 아님.
+- CDT = **비전만, 평가 0**; 논문 2개 중 2510.16395는 **철회**, 2503.07967이 실체.
+- Lore = **구현·평가 없는 제안**.
+- Confucius = **유일 실평가**지만 그래프·staleness 없음, 숫자는 논문 자기보고(미재현).
+- Heidelberg = **유일 실측**(채택률·14카테고리·50% 무수정) — 가장 신뢰할 경험 근거.
+- 이 절 전체가 **§1~§6의 3표 적대검증을 안 거침** — 반영·결정 전 필요하면 핵심 주장만 재검증 권장.
+
+---
+
 ## 부록 — 1차 출처
 
 - Glean: engineering.fb.com/2024/12/19/developer-tools/glean-open-source-code-indexing/ · github.com/facebookincubator/Glean · glean.software/docs/angle/guide/
@@ -137,3 +205,13 @@
 - CPG/Joern: cpg.joern.io · docs.joern.io/code-property-graph/
 - Graphiti/Zep: github.com/getzep/graphiti · arxiv.org/abs/2501.13956
 - neo4j-graphrag: neo4j.com/docs/neo4j-graphrag-python/current/user_guide_kg_builder.html
+
+### §7 확장 라운드(2026-07-01) 출처
+
+- Meta tribal-knowledge(five-questions): engineering.fb.com/2026/04/06/developer-tools/how-meta-used-ai-to-map-tribal-knowledge-in-large-scale-data-pipelines/
+- Code Digital Twin (CDT): arxiv.org/abs/2503.07967 · (철회본) arxiv.org/abs/2510.16395
+- Lore (commit-trailer 지식 프로토콜): arxiv.org/abs/2603.15566
+- Context Engineering for AI Agents in OSS (Heidelberg): arxiv.org/abs/2510.21413
+- Confucius Code Agent (Meta+Harvard): arxiv.org/abs/2512.10398
+- 2차·비평: techjacksolutions.com/ai-brief/the-context-problem-in-enterprise-agentic-ai-what-metas-trib/ · medium.com/@jprevanth (의미-격차 비평)
+- 상용 가이드: claude.com/blog/using-claude-md-files · repowise.dev/blog/comparisons/best-codebase-documentation-tools-ai-agents
