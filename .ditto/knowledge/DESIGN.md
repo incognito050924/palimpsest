@@ -79,6 +79,7 @@
 - ✅ **slice 4 = 의미층 첫 적재 계약** (`wi_260701cjf`, **shipped·검증 통과**, ADR-20260701-semantic-layer-load-contract): 외부 생성 tacit 요약을 `Summary` 노드 + `SUMMARIZES`(inferred)로 **근거결박·inferred 분리·provenance 강제**로 적재. provider-free. 회상은 'summaries' 분리 채널. code=SoT: `src/palimpsest/kg/summary.py`.
 
 - ✅ **요약 durability(git-SoT)** (`wi_260701ffv`, **shipped·검증 통과**, 커밋 `e51a1b2`): 외부 생성 요약 payload를 git-tracked `summaries/` 디렉토리에 SoT로 두고 CLI `load <dir>`로 일괄 재적재. 결정적 `summary:<sha256>` id + MERGE 멱등이라 Neo4j drop→reload가 동일 Summary·SUMMARIZES 복원(멱등 rebuild 테스트). provider-free 유지. git=SoT는 ADR-20260626 #2의 요약 적용(ADR-20260701 durability change-condition 충족).
+- ✅ **stale 감지(#4, detect-only)** (`wi_260701odo`/`wi_260701v0q`, **shipped·검증 통과**, 커밋 `7e11979`): 회상 summaries 채널의 각 항목에 `stale` bool 노출 — 대상 노드의 현재 `committed_at`이 요약 `code_bound_at`과 다르면(재ingest로 갱신됨) stale=true. 순수 read-side(새 Cypher 왕복 없음), provider-free. **자동 재생성(LLM 필요)은 경계 밖 유지.**
 - ✅ **recall correctness + 요약 실적재 경로** (`wi_2607016ir`, **shipped·검증 통과**, 커밋 `6197c80`): ① recall `_RESOLVE`에 `ORDER BY head(labels(n))` — label-free MATCH id 충돌 해소(#5) · ② `_NEIGHBORS`/`_SUMMARIES`에 `ORDER BY` 뒤 `LIMIT` — 순회 예산 server-side bound, 정상 노드 동등성 유지(#6) · ③ 외부 생성 요약을 실제로 적재하는 CLI `load` 진입점 신설(provider-free 유지). 검증: 전체 39 passed, 4 AC evidence-gated. code=SoT: `src/palimpsest/{recall/graphrag.py,cli.py,ir.py}`. *근거: 의미층 후속(아래 유예)의 실사용 전제(적재 경로)를 먼저 세운다.*
 
 - 🔶 **유예된 의미층 후속** — 실적재 경로로 실제 사용·고통을 확인하고 각 ADR change-condition을 재검토한 뒤 착수:
@@ -87,9 +88,8 @@
   |---|---|
   | **#1 내용(semantic) 검증층** | 요약이 근거를 *의미적으로* 뒷받침하는지 판정. ADR이 형식(근거결박)만 실현하고 명시 유예. provider-free상 판정은 외부 eval/사람, 코퍼스 허가 필요. |
   | **#3 요약 대상 확장** | `Risk`/`DesignDecision`/`Community` 노드로 요약 대상 확대. 그 노드 타입이 아직 KG에 부재(생산자 없음) → 온톨로지 신설 선행. ADR 범위 밖. |
-  | **#4 stale reconcile** | `code_bound_at`이 대상 커밋 뒤로 밀린 요약의 stale 감지·재조정. 감지는 provider-free(결정적)이나 자동 재생성은 LLM 필요라 provider-free와 충돌 → detect/flag까지가 경계. |
 
-  *(#2 요약 durability는 shipped — 아래 로드맵 참조.)*
+  *(#2 durability·#4 stale detect는 shipped — 아래 로드맵 참조. #4의 자동 재생성은 provider-free 충돌로 경계 밖 유지.)*
 
 - 🔶 **이후 슬라이스(확장축)** — 각 슬라이스가 켜는 기능·온톨로지 조각:
 
@@ -108,7 +108,7 @@
 ## 7. 미결 · 검증 대상
 
 - ✅ **DB substrate (v1)** — Neo4j Community 채택·실현(`src/palimpsest/kg`, testcontainers 검증). 단 성능·메모리·재구축 **실측 벤치는 여전히 미결**(스파이크 §4 지표). → `docs/spikes/db-substrate-spike.md` (`wi_2606264gw`).
-- ◐ **node/edge 설계** — 정적/결정론층 v1 실현 + 의미층 첫 적재 slice 4 실현(§2-bis). 남은 미결: derived/inferred 엣지 생성 메커니즘 · LLM 추론 엣지 precision 가드레일(내용 검증, 유예 #1) · CPG intra-procedural → cross-branch 확장 · 코드-결박 신선도 stale 판정·재조정(유예 #4). → `docs/research/precompute-hugrag-kg.md`.
+- ◐ **node/edge 설계** — 정적/결정론층 v1 실현 + 의미층 첫 적재 slice 4 실현(§2-bis). 코드-결박 신선도 **stale 판정은 실현**(wi_260701v0q, 회상 stale flag). 남은 미결: derived/inferred 엣지 생성 메커니즘 · LLM 추론 엣지 precision 가드레일(내용 검증, 유예 #1) · CPG intra-procedural → cross-branch 확장 · stale **재조정=자동 재생성**(provider-free 충돌로 경계 밖). → `docs/research/precompute-hugrag-kg.md`.
 - ◐ **스키마 상세** — 정적 엔티티/관계 + Summary/SUMMARIZES는 실현(code=SoT). 의미층 나머지 노드(`Risk`/`DesignDecision`/`Community`, 유예 #3)·신선도 2축(`valid_from/valid_to` 결정-계보)·`Risk` 노드 vs 관계는 미결.
 - ✅ **요약 durability** — git-tracked `summaries/` SoT + CLI `load <dir>` 재구축으로 **해소**(wi_260701ffv, 커밋 `e51a1b2`): Neo4j drop→reload 멱등 복원. 다중 대상 코드베이스별 요약 분리·요약 payload 생산 파이프라인은 후속 여지.
 - ✅ **recall boundedness/정확성** — `_RESOLVE` label-free id 충돌·순회 예산 client-side를 **해소**(wi_2607016ir, 커밋 `6197c80`): 결정적 tie-break + server-side Cypher `LIMIT`. `_SUMMARIES` row-bound 정책(병리적 고요약 노드에서 distinct summary vs row 단위)은 후속 여지.
