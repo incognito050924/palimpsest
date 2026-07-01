@@ -31,10 +31,10 @@ palimpsest 의미층 적재 계약을 다음으로 결정한다.
 ## 유예·범위 밖 (명시)
 
 - **내용(semantic) 검증**: 요약이 근거를 의미적으로 뒷받침하는지 판정 — 미도입(이번은 형식 검증만).
-- **요약 durability**: 현재 Neo4j-only — DB drop→rebuild 시 소실(git-SoT 영속 미확보).
+- **요약 durability**: ~~현재 Neo4j-only — DB drop→rebuild 시 소실~~ → **실현(2026-07-02, wi_260701ffv)**: 외부 생성 요약 payload를 git-tracked `summaries/` 디렉토리에 SoT로 두고 CLI `load <dir>`로 재구축. 결정적 `summary:<sha256>` id + MERGE 멱등이라 Neo4j drop→reload가 동일 Summary·SUMMARIZES를 복원. git=SoT 방향은 ADR-20260626 #2(KG는 재구축 가능한 projection)를 요약에 적용한 것이며 provider-free 유지.
 - 커뮤니티/설계결정/위험 대상, 자동 재생성 — 범위 밖.
 
 ## 철회·변경 조건 (change_condition)
 
 - **내용 검증층 도입** 시(형식 검증을 넘어 요약이 근거를 의미적으로 뒷받침하는지 판정) 재검토한다.
-- **요약 durability 결정** 시(git-SoT 영속으로 Neo4j drop→rebuild 내구성 확보) 재검토한다.
+- ~~**요약 durability 결정** 시(git-SoT 영속으로 Neo4j drop→rebuild 내구성 확보) 재검토한다.~~ → **충족·실현**(2026-07-02, wi_260701ffv): git-tracked `summaries/` SoT + `load <dir>` 재구축. 위 "유예·범위 밖" 참조.

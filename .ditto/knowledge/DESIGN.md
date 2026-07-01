@@ -78,6 +78,7 @@
 - ✅ **v1 = 온톨로지 + grounded 회상 slice** (`wi_2606263sn`, **shipped·검증 통과**, ADR-20260701-v1-ontology-recall-reframe): 코드베이스(EcoleTree Java monolith)를 캡처→KG 온톨로지→GraphRAG로 관련 코드·의존을 **출처 붙여 점진 회상**. 성공 = **온톨로지 구축·동작 보장**(실코퍼스 158파일 e2e + 테스트 + 독립 verify), 회상 퀄리티는 다음. code=SoT: `src/palimpsest/`. *(재프레임 전 v1 후보였던 "설계위험 감지"는 slice 2로 유예.)*
 - ✅ **slice 4 = 의미층 첫 적재 계약** (`wi_260701cjf`, **shipped·검증 통과**, ADR-20260701-semantic-layer-load-contract): 외부 생성 tacit 요약을 `Summary` 노드 + `SUMMARIZES`(inferred)로 **근거결박·inferred 분리·provenance 강제**로 적재. provider-free. 회상은 'summaries' 분리 채널. code=SoT: `src/palimpsest/kg/summary.py`.
 
+- ✅ **요약 durability(git-SoT)** (`wi_260701ffv`, **shipped·검증 통과**, 커밋 `e51a1b2`): 외부 생성 요약 payload를 git-tracked `summaries/` 디렉토리에 SoT로 두고 CLI `load <dir>`로 일괄 재적재. 결정적 `summary:<sha256>` id + MERGE 멱등이라 Neo4j drop→reload가 동일 Summary·SUMMARIZES 복원(멱등 rebuild 테스트). provider-free 유지. git=SoT는 ADR-20260626 #2의 요약 적용(ADR-20260701 durability change-condition 충족).
 - ✅ **recall correctness + 요약 실적재 경로** (`wi_2607016ir`, **shipped·검증 통과**, 커밋 `6197c80`): ① recall `_RESOLVE`에 `ORDER BY head(labels(n))` — label-free MATCH id 충돌 해소(#5) · ② `_NEIGHBORS`/`_SUMMARIES`에 `ORDER BY` 뒤 `LIMIT` — 순회 예산 server-side bound, 정상 노드 동등성 유지(#6) · ③ 외부 생성 요약을 실제로 적재하는 CLI `load` 진입점 신설(provider-free 유지). 검증: 전체 39 passed, 4 AC evidence-gated. code=SoT: `src/palimpsest/{recall/graphrag.py,cli.py,ir.py}`. *근거: 의미층 후속(아래 유예)의 실사용 전제(적재 경로)를 먼저 세운다.*
 
 - 🔶 **유예된 의미층 후속** — 실적재 경로로 실제 사용·고통을 확인하고 각 ADR change-condition을 재검토한 뒤 착수:
@@ -85,9 +86,10 @@
   | 유예 항목 | 무엇 · 왜 유예 |
   |---|---|
   | **#1 내용(semantic) 검증층** | 요약이 근거를 *의미적으로* 뒷받침하는지 판정. ADR이 형식(근거결박)만 실현하고 명시 유예. provider-free상 판정은 외부 eval/사람, 코퍼스 허가 필요. |
-  | **#2 요약 durability(git-SoT)** | 현재 Neo4j-only라 drop→rebuild 시 소실. git 아티팩트를 SoT로 두는 재구축 계약. ADR이 durability 유예. |
   | **#3 요약 대상 확장** | `Risk`/`DesignDecision`/`Community` 노드로 요약 대상 확대. 그 노드 타입이 아직 KG에 부재(생산자 없음) → 온톨로지 신설 선행. ADR 범위 밖. |
   | **#4 stale reconcile** | `code_bound_at`이 대상 커밋 뒤로 밀린 요약의 stale 감지·재조정. 감지는 provider-free(결정적)이나 자동 재생성은 LLM 필요라 provider-free와 충돌 → detect/flag까지가 경계. |
+
+  *(#2 요약 durability는 shipped — 아래 로드맵 참조.)*
 
 - 🔶 **이후 슬라이스(확장축)** — 각 슬라이스가 켜는 기능·온톨로지 조각:
 
@@ -108,7 +110,7 @@
 - ✅ **DB substrate (v1)** — Neo4j Community 채택·실현(`src/palimpsest/kg`, testcontainers 검증). 단 성능·메모리·재구축 **실측 벤치는 여전히 미결**(스파이크 §4 지표). → `docs/spikes/db-substrate-spike.md` (`wi_2606264gw`).
 - ◐ **node/edge 설계** — 정적/결정론층 v1 실현 + 의미층 첫 적재 slice 4 실현(§2-bis). 남은 미결: derived/inferred 엣지 생성 메커니즘 · LLM 추론 엣지 precision 가드레일(내용 검증, 유예 #1) · CPG intra-procedural → cross-branch 확장 · 코드-결박 신선도 stale 판정·재조정(유예 #4). → `docs/research/precompute-hugrag-kg.md`.
 - ◐ **스키마 상세** — 정적 엔티티/관계 + Summary/SUMMARIZES는 실현(code=SoT). 의미층 나머지 노드(`Risk`/`DesignDecision`/`Community`, 유예 #3)·신선도 2축(`valid_from/valid_to` 결정-계보)·`Risk` 노드 vs 관계는 미결.
-- ◐ **요약 durability** — Neo4j-only, git-SoT 재구축 계약 미결(유예 #2).
+- ✅ **요약 durability** — git-tracked `summaries/` SoT + CLI `load <dir>` 재구축으로 **해소**(wi_260701ffv, 커밋 `e51a1b2`): Neo4j drop→reload 멱등 복원. 다중 대상 코드베이스별 요약 분리·요약 payload 생산 파이프라인은 후속 여지.
 - ✅ **recall boundedness/정확성** — `_RESOLVE` label-free id 충돌·순회 예산 client-side를 **해소**(wi_2607016ir, 커밋 `6197c80`): 결정적 tie-break + server-side Cypher `LIMIT`. `_SUMMARIES` row-bound 정책(병리적 고요약 노드에서 distinct summary vs row 단위)은 후속 여지.
 - ⬜ **임베딩 설계** — 부착 대상·차원·하이브리드 검색 구성(v1 미포함).
 - ✅ **데모 코퍼스 (v1)** — `EcoleTreeSystems`(Java monolith) 확정·사용. 두 브랜치 설계위험 시나리오는 slice 2에서. *(주의: EcoleTreeSystems repo에 대한 git 작업 금지 — 읽기 전용 코퍼스.)*
