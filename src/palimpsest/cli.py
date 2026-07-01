@@ -13,12 +13,15 @@ Two stdlib-argparse subcommands wire the deterministic slice end to end:
       summaries (in their own channel, never merged into items), gaps, and
       confidence — never a merged prose answer.
 
-  load PAYLOAD.json
-      Load an externally-produced summary JSON payload (an array of summary
-      objects) into the inferred layer via grounded, summary-atomic load. Prints
-      the loaded count and EVERY rejection reason — rejections are surfaced,
-      never silently dropped. palimpsest calls no model; the payload is generated
-      elsewhere.
+  load PAYLOAD.json | PAYLOAD_DIR/
+      Load externally-produced summary JSON payloads (each an array of summary
+      objects) into the inferred layer via grounded, summary-atomic load. Accepts
+      a single file OR a DIRECTORY — the directory is the git-tracked
+      source-of-truth (git = SoT, Neo4j = re-buildable projection), so every
+      *.json inside it is batch-loaded and a dropped Neo4j can be rebuilt by
+      re-running load (deterministic ids make it idempotent). Prints the loaded
+      count and EVERY rejection reason — rejections are surfaced, never silently
+      dropped. palimpsest calls no model; payloads are generated elsewhere.
 
 The Neo4j connection comes from the environment (localhost defaults):
   NEO4J_URI (bolt://localhost:7687), NEO4J_USER (neo4j), NEO4J_PASSWORD (neo4j).
@@ -31,6 +34,7 @@ import json
 import os
 import sys
 from contextlib import contextmanager
+from pathlib import Path
 
 from neo4j import GraphDatabase
 
@@ -74,9 +78,22 @@ def _cmd_query(args) -> None:
     _print_result(args.symbol, args.depth, args.limit, result)
 
 
+def _read_payload_file(path) -> list:
+    with open(path, encoding="utf-8") as f:
+        return [Summary.from_dict(d) for d in json.load(f)]
+
+
 def _cmd_load(args) -> None:
-    with open(args.payload, encoding="utf-8") as f:
-        summaries = [Summary.from_dict(d) for d in json.load(f)]
+    # A DIRECTORY is the git-tracked source-of-truth: batch-load every *.json
+    # payload file inside it (sorted, deterministic) so a Neo4j drop can be
+    # rebuilt from git. A single file keeps the original one-payload behavior.
+    if os.path.isdir(args.payload):
+        summaries = [
+            s for p in sorted(Path(args.payload).glob("*.json"))
+            for s in _read_payload_file(p)
+        ]
+    else:
+        summaries = _read_payload_file(args.payload)
     with _driver() as driver:
         result = load_summaries(driver, summaries)
     _print_load_result(args.payload, result)
@@ -158,7 +175,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="load an externally-produced summary JSON payload (provider-free)",
     )
     p_load.add_argument(
-        "payload", help="path to a JSON file: an array of summary objects"
+        "payload",
+        help="a JSON file (array of summary objects) OR a directory of such "
+        "files — the git-tracked source-of-truth to rebuild Neo4j from",
     )
     p_load.set_defaults(func=_cmd_load)
     return parser

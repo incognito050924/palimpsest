@@ -133,6 +133,77 @@ def test_e2e_load_valid_payload_loads_and_unresolved_is_rejected(
     assert "unresolved" in out          # the honest rejection reason, not silence
 
 
+# --- ac-1/ac-2: durability — load a git-tracked payload DIRECTORY + rebuild -----
+
+
+def _summary_snapshot(driver):
+    """The inferred layer as (Summary ids, SUMMARIZES (summary_id, target_id) pairs)."""
+    with driver.session() as session:
+        nodes = sorted(r["id"] for r in session.run("MATCH (s:Summary) RETURN s.id AS id"))
+        edges = sorted(
+            (r["sid"], r["tid"])
+            for r in session.run(
+                "MATCH (s:Summary)-[:SUMMARIZES]->(t) RETURN s.id AS sid, t.id AS tid"
+            )
+        )
+    return nodes, edges
+
+
+def _write_payload_dir(root):
+    """A git-tracked payload DIRECTORY: two JSON files, each an array of summaries,
+    all grounded in real ingested fixture nodes."""
+    root.mkdir()
+    (root / "a.json").write_text(
+        json.dumps([_summary_dict(CTRL_METHOD, [CTRL_METHOD, SVC_METHOD])])
+    )
+    (root / "b.json").write_text(json.dumps([_summary_dict(SVC_METHOD, [SVC_METHOD])]))
+    return root
+
+
+def test_e2e_load_directory_batch_loads_every_payload(cli_env, capsys, tmp_path):
+    """ac-1: `load` accepts a DIRECTORY and batch-loads EVERY summary JSON payload
+    file inside it (two files -> two summaries), printing the loaded/rejected
+    counts. The single-file path (covered above) keeps working."""
+    assert cli.main(["ingest", "--repo", str(FIXTURES)]) == 0
+    capsys.readouterr()  # drop ingest output
+
+    payload_dir = _write_payload_dir(tmp_path / "summaries")
+    assert cli.main(["load", str(payload_dir)]) == 0
+    out = capsys.readouterr().out
+    assert "LOADED 2/2" in out          # both files' summaries loaded
+    assert "REJECTED (0)" in out
+
+
+def test_e2e_rebuild_from_git_payload_dir_restores_summaries(cli_env, tmp_path):
+    """ac-2: durability proof. Load summaries from a git payload dir, DROP every
+    Summary node + SUMMARIZES edge from Neo4j (a Neo4j rebuild), then reload from
+    the SAME dir — the identical Summary nodes + edges are restored because the ids
+    are deterministic (git = SoT, Neo4j = re-buildable projection)."""
+    assert cli.main(["ingest", "--repo", str(FIXTURES)]) == 0
+
+    payload_dir = _write_payload_dir(tmp_path / "summaries")
+    assert cli.main(["load", str(payload_dir)]) == 0
+
+    driver = cli_env.get_driver()
+    try:
+        before = _summary_snapshot(driver)
+        assert before[0], "expected Summary nodes after the initial load"
+        assert before[1], "expected SUMMARIZES edges after the initial load"
+
+        # Neo4j drop: wipe the inferred layer (the projection), keep git SoT.
+        with driver.session() as session:
+            session.run("MATCH (s:Summary) DETACH DELETE s")
+        assert _summary_snapshot(driver) == ([], [])
+
+        # Rebuild from the git payload dir.
+        assert cli.main(["load", str(payload_dir)]) == 0
+        after = _summary_snapshot(driver)
+    finally:
+        driver.close()
+
+    assert after == before  # same deterministic ids, same edges restored
+
+
 # --- ac-4: the CLI load path imports NO generative module (provider-free) ------
 
 
