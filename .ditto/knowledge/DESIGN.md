@@ -86,7 +86,7 @@
 
   | 유예 항목 | 무엇 · 왜 유예 |
   |---|---|
-  | **#1 내용(semantic) 검증층** | 요약이 근거를 *의미적으로* 뒷받침하는지 판정. ADR이 형식(근거결박)만 실현하고 명시 유예. provider-free상 판정은 외부 eval/사람, 코퍼스 허가 필요. |
+  | **#1 내용(semantic) 검증층** — ◐ 부분 shipped | **배선 실현**(wi_260701ulo, 커밋 `f1074ad`): 외부 판정자(ditto)가 만든 verdict를 `Summary.semantic_verdict`로 ingest·annotate(unfaithful도 로드, 회상 flag 노출), provider-free 유지. **후속(ditto 측)**: 판정 하네스·라벨 코퍼스·per-claim. 코퍼스는 Java 전용 추출기 제약(self-Python-repo 불가). |
   | **#3 요약 대상 확장** | `Risk`/`DesignDecision`/`Community` 노드로 요약 대상 확대. 그 노드 타입이 아직 KG에 부재(생산자 없음) → 온톨로지 신설 선행. ADR 범위 밖. |
 
   *(#2 durability·#4 stale detect는 shipped — 아래 로드맵 참조. #4의 자동 재생성은 provider-free 충돌로 경계 밖 유지.)*
