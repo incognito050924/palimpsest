@@ -30,13 +30,15 @@ from palimpsest.ir import (
     IMPORTS,
     CALLS,
     DEPENDS_ON,
+    SUMMARY,
+    EDGE_KIND_DETERMINISTIC,
 )
 
-# The ontology, closed and explicit (no dynamic labels from data).
-NODE_LABELS = [REPO, PACKAGE, FILE, CLASS, METHOD, "Episode"]
+# The ontology, closed and explicit (no dynamic labels from data). ``Summary`` is
+# the inferred-layer label; it carries no deterministic IR node, but is listed
+# here so ``create_constraints`` provisions its uniqueness CONSTRAINT.
+NODE_LABELS = [REPO, PACKAGE, FILE, CLASS, METHOD, "Episode", SUMMARY]
 REL_TYPES = [CONTAINS, IMPORTS, CALLS, DEPENDS_ON]
-
-EDGE_KIND_DETERMINISTIC = "deterministic"
 
 # A MERGE-on-id per label; property SET is uniform (unused props resolve to
 # null, which Neo4j drops — Repo/Package simply carry no path/line grounding).

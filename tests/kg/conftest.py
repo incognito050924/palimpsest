@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from palimpsest.extract import extract
-from palimpsest.ir import Provenance
-from palimpsest.kg import create_constraints, ingest
+from palimpsest.ir import CLASS, METHOD, Provenance, Summary, SummaryClaim
+from palimpsest.kg import create_constraints, ingest, load_summaries
 
 
 def _configure_docker_endpoint() -> None:
@@ -90,3 +90,40 @@ def ingested(clean_db, ir):
     """A clean DB with the fixture IR ingested once."""
     ingest(clean_db, ir)
     return clean_db
+
+
+@pytest.fixture
+def summary_payload(ir):
+    """A valid external summary whose target + every claim ref are real IR nodes.
+
+    Built from the fixture IR so ``target_id`` and each ``source_ref`` resolve;
+    ``code_bound_at`` therefore binds to the target Method's ``committed_at``.
+    """
+    method = next(n for n in ir.nodes if n.kind == METHOD)
+    klass = next(n for n in ir.nodes if n.kind == CLASS)
+    return Summary(
+        target_id=method.qualified_name,
+        claims=(
+            SummaryClaim(
+                text="Handles the go-to-work punch-in flow.",
+                source_refs=(method.qualified_name,),
+            ),
+            SummaryClaim(
+                text="Coupled to its declaring service class.",
+                source_refs=(klass.qualified_name,),
+            ),
+        ),
+        generator="palimpsest-fixture-generator",
+        model="fixture-model-v1",
+        source_commit=PROV.source_commit,
+        created_at="2026-07-01T09:00:00+09:00",
+        prompt="summarize this method",
+        confidence=0.9,
+    )
+
+
+@pytest.fixture
+def summaries_loaded(ingested, summary_payload):
+    """The deterministic graph with one valid summary layered on top."""
+    result = load_summaries(ingested, [summary_payload])
+    return ingested, result

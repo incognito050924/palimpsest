@@ -30,11 +30,23 @@ FILE = "File"
 CLASS = "Class"
 METHOD = "Method"
 
-# Edge kinds
+# Edge kinds (deterministic structural ontology)
 CONTAINS = "CONTAINS"
 IMPORTS = "IMPORTS"
 CALLS = "CALLS"
 DEPENDS_ON = "DEPENDS_ON"
+
+# Inferred semantic layer: externally-generated summaries (palimpsest is
+# provider-free — it never calls an LLM; a summary is produced elsewhere and
+# handed in for grounded load). A Summary node SUMMARIZES the code it grounds.
+SUMMARY = "Summary"          # node label
+SUMMARIZES = "SUMMARIZES"    # edge type
+
+# ``edge_kind`` marker — the schema-enforced no-laundering separation between the
+# deterministic structural layer and the inferred semantic layer. Both values are
+# colocated here so the two edge_kind constants live in one place.
+EDGE_KIND_DETERMINISTIC = "deterministic"
+EDGE_KIND_INFERRED = "inferred"
 
 
 @dataclass(frozen=True)
@@ -136,3 +148,58 @@ class IR:
         return any(
             e.kind == kind and e.src == src and e.dst == dst for e in self.edges
         )
+
+
+@dataclass(frozen=True)
+class SummaryClaim:
+    """One grounded assertion inside a :class:`Summary`.
+
+    ``source_refs`` are node ids (a symbol ``qualified_name`` or a repo-relative
+    file path) that must each resolve to a real graph node — a claim with no
+    resolvable ref is ungrounded prose, and the loader rejects the whole summary
+    rather than launder it in.
+    """
+
+    text: str
+    source_refs: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict:
+        return {"text": self.text, "source_refs": list(self.source_refs)}
+
+
+@dataclass(frozen=True)
+class Summary:
+    """An externally-generated semantic summary of one code entity.
+
+    palimpsest never calls an LLM: the summary is produced elsewhere and handed
+    in for grounded, idempotent load. ``target_id`` is the summarized node (the
+    ``SUMMARIZES`` anchor); ``source_commit`` is the code commit it was generated
+    against — together with ``generator``/``model`` they derive the deterministic,
+    namespace-isolated Summary id.
+
+    ``code_bound_at`` is deliberately NOT a field here: freshness must follow the
+    code, not the generator's wall-clock, so the loader binds it to the resolved
+    target node's ``committed_at`` (a git-less external summary has no meaningful
+    commit time of its own). ``created_at`` is the external generation time.
+    """
+
+    target_id: str
+    claims: tuple[SummaryClaim, ...]
+    generator: str
+    model: str
+    source_commit: str
+    created_at: str
+    prompt: Optional[str] = None
+    confidence: Optional[float] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "target_id": self.target_id,
+            "claims": [c.to_dict() for c in self.claims],
+            "generator": self.generator,
+            "model": self.model,
+            "source_commit": self.source_commit,
+            "created_at": self.created_at,
+            "prompt": self.prompt,
+            "confidence": self.confidence,
+        }

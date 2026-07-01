@@ -6,5 +6,18 @@ rebuildable) with git provenance + freshness stamping.
 """
 
 from palimpsest.kg.ingest import create_constraints, ingest
+from palimpsest.kg.summary import (
+    Rejection,
+    SummaryLoadResult,
+    load_summaries,
+    summary_id,
+)
 
-__all__ = ["create_constraints", "ingest"]
+__all__ = [
+    "create_constraints",
+    "ingest",
+    "load_summaries",
+    "summary_id",
+    "SummaryLoadResult",
+    "Rejection",
+]

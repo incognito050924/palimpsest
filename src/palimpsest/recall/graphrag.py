@@ -21,8 +21,19 @@ Design (ac-2 recall + ac-3 honesty):
 
 * **Combinatorial only (ac-3).** Assembly is pure graph traversal + dict
   building. There is no LLM / generative call anywhere on this path. Output
-  fields stay SEPARATED — ``{items, sources, gaps, confidence, expand_handle}``,
+  fields stay SEPARATED —
+  ``{items, sources, summaries, gaps, confidence, expand_handle}``,
   never a merged prose "answer".
+
+* **Inferred summaries as a separate channel.** Externally-generated summaries
+  (the inferred layer, loaded elsewhere — palimpsest never calls an LLM) surface
+  in their own ``summaries`` channel, NEVER merged into ``items``. SUMMARIZES is
+  not a traversable relation: the structural whitelist (CALLS / DEPENDS_ON /
+  CONTAINS / IMPORTS) is the only thing recall walks, so a Summary can never leak
+  into the grounded ``items``. The channel is bounded by the same depth/limit
+  budget (it is keyed off the already-budgeted recalled node ids), each entry
+  carrying its grounding refs, bound commit (``code_bound_at``) and the inferred
+  ``edge_kind`` marker.
 
 * **Gaps (ac-3 honesty).** If the seed does not resolve, or an *explicitly
   requested* relation has no edges on the seed, that is stated as an explicit
@@ -31,6 +42,8 @@ Design (ac-2 recall + ac-3 honesty):
 """
 
 from __future__ import annotations
+
+import json
 
 from palimpsest.ir import CALLS, DEPENDS_ON, CONTAINS, IMPORTS
 
@@ -60,6 +73,23 @@ _SEED_REL_TYPES = (
     "MATCH (a {id: $id})-[r]-() WHERE type(r) IN $rels "
     "RETURN DISTINCT type(r) AS relation"
 )
+
+# The inferred semantic layer, as a SEPARATE channel. For the recalled node ids
+# (already depth/limit bounded), pull each attached Summary plus the code spans it
+# grounds to. Bounded by construction — never the whole graph's summaries. One row
+# per (summary, grounded ref); ``edge_kind`` rides in as the inferred marker.
+_SUMMARIES = """
+UNWIND $ids AS anchor_id
+MATCH (s:Summary)-[:SUMMARIZES]->({id: anchor_id})
+WITH DISTINCT s
+MATCH (s)-[r:SUMMARIZES]->(g)
+RETURN s.id AS id, s.target_id AS target_id, s.claims AS claims,
+       s.code_bound_at AS code_bound_at, r.edge_kind AS edge_kind,
+       g.id AS ref_id, g.source_commit AS source_commit, g.path AS path,
+       g.start_line AS start_line, g.end_line AS end_line,
+       g.committed_at AS committed_at
+ORDER BY id, ref_id
+"""
 
 
 def _kind(labels) -> str | None:
@@ -119,8 +149,45 @@ def _resolve(driver, query):
 
 
 def _neighbors(driver, ids, rels):
+    # Traversal whitelist: only the deterministic structural ontology is ever
+    # walked. SUMMARIZES (inferred) is not traversable — even if a caller passes
+    # it in ``relations`` — so a Summary can never leak into the items channel;
+    # it surfaces solely through the separate summaries channel.
+    rels = [r for r in rels if r in DEFAULT_RELATIONS]
     with driver.session() as session:
-        return [r.data() for r in session.run(_NEIGHBORS, ids=list(ids), rels=list(rels))]
+        return [r.data() for r in session.run(_NEIGHBORS, ids=list(ids), rels=rels)]
+
+
+def _summary_channel(rows) -> list:
+    """Group flat (summary, grounded-ref) rows into the separate summaries
+    channel: one entry per Summary, each with its grounding refs (author-omitted,
+    via :func:`_sources`), the bound commit (``code_bound_at``) and the inferred
+    ``edge_kind`` marker. The summary text stays here — never merged into items."""
+    by_id: dict = {}
+    for row in rows:
+        entry = by_id.get(row["id"])
+        if entry is None:
+            entry = {
+                "id": row["id"],
+                "target_id": row["target_id"],
+                "claims": [json.loads(c) for c in (row["claims"] or [])],
+                "edge_kind": row["edge_kind"],      # inferred marker, from the edge
+                "code_bound_at": row["code_bound_at"],  # bound commit (freshness)
+                "refs": [],
+            }
+            by_id[row["id"]] = entry
+        entry["refs"].append({"id": row["ref_id"], **_sources(row)})
+    return list(by_id.values())
+
+
+def _summaries(driver, items) -> list:
+    """The inferred-summary channel for the recalled ``items`` (already bounded)."""
+    if not items:
+        return []
+    ids = [it["id"] for it in items]
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_SUMMARIES, ids=ids)]
+    return _summary_channel(rows)
 
 
 def _seed_relation_gaps(driver, query, relations):
@@ -156,11 +223,13 @@ def _hop(driver, frontier, visited, relations, depth, budget):
     return items, emitted, truncated
 
 
-def _result(items, gaps, handle):
+def _result(items, gaps, handle, summaries):
     return {
         "items": items,
         # Separate grounding channel (id-keyed), mirrors items — never merged.
         "sources": [{"id": it["id"], **it["sources"]} for it in items],
+        # Separate inferred-summary channel — never merged into items.
+        "summaries": summaries,
         "gaps": gaps,
         "confidence": _confidence(items),
         "expand_handle": handle,
@@ -185,7 +254,9 @@ def recall(driver, query, depth=1, limit=25, relations=None):
     ``query`` is a node id (symbol ``qualified_name`` or repo-relative path).
     Traverses CALLS / DEPENDS_ON / CONTAINS / IMPORTS up to ``depth`` hops,
     returning at most ``limit`` items. Returns
-    ``{items, sources, gaps, confidence, expand_handle}``.
+    ``{items, sources, summaries, gaps, confidence, expand_handle}`` — the
+    ``summaries`` channel holds any inferred summaries grounded in the recalled
+    nodes, kept separate from ``items``.
     """
     # A gap is only raised per-relation when the caller *explicitly* narrows the
     # relation set; the default (all four) reports gaps only for an isolated or
@@ -196,7 +267,7 @@ def recall(driver, query, depth=1, limit=25, relations=None):
     seed = _resolve(driver, query)
     if seed is None:
         gap = f"seed '{query}' did not resolve to any node in the graph"
-        return _result([], [gap], None)
+        return _result([], [gap], None, [])
 
     seed_item = _item(seed, None, 0)
     items = [seed_item]
@@ -228,7 +299,7 @@ def recall(driver, query, depth=1, limit=25, relations=None):
         handle = None
 
     gaps = _seed_relation_gaps(driver, query, relations) if explicit_relations else []
-    return _result(items, gaps, handle)
+    return _result(items, gaps, handle, _summaries(driver, items))
 
 
 def _neighbors_beyond(driver, frontier, visited, relations) -> bool:
@@ -244,10 +315,10 @@ def expand(driver, handle, limit=25):
 
     Combinatorial, on-demand continuation: one more BFS hop from the handle's
     frontier, skipping already-seen nodes, bounded by ``limit``. Returns the
-    same ``{items, sources, gaps, confidence, expand_handle}`` shape.
+    same ``{items, sources, summaries, gaps, confidence, expand_handle}`` shape.
     """
     if not handle or not handle.get("frontier"):
-        return _result([], ["no frontier to expand"], None)
+        return _result([], ["no frontier to expand"], None, [])
 
     relations = tuple(handle.get("relations") or DEFAULT_RELATIONS)
     visited = set(handle["visited"])
@@ -265,4 +336,4 @@ def expand(driver, handle, limit=25):
     else:
         next_handle = None
 
-    return _result(new_items, [], next_handle)
+    return _result(new_items, [], next_handle, _summaries(driver, new_items))

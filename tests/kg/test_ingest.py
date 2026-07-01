@@ -61,8 +61,8 @@ def test_edge_counts_per_rel_type(ingested, ir):
         assert rel_count(ingested, rel) == expected[rel], rel
 
 
-def test_every_edge_carries_edge_kind_deterministic(ingested, ir):
-    with ingested.session() as session:
+def _edge_kind_counts(driver):
+    with driver.session() as session:
         total = session.run(
             "MATCH ()-[r]->() RETURN count(r) AS c"
         ).single()["c"]
@@ -70,12 +70,47 @@ def test_every_edge_carries_edge_kind_deterministic(ingested, ir):
             "MATCH ()-[r]->() WHERE r.edge_kind = 'deterministic' "
             "RETURN count(r) AS c"
         ).single()["c"]
+        inferred = session.run(
+            "MATCH ()-[r]->() WHERE r.edge_kind = 'inferred' RETURN count(r) AS c"
+        ).single()["c"]
         missing = session.run(
             "MATCH ()-[r]->() WHERE r.edge_kind IS NULL RETURN count(r) AS c"
         ).single()["c"]
-    assert total == sum(expected_rel_counts(ir).values()) > 0
-    assert deterministic == total
+    return total, deterministic, inferred, missing
+
+
+def test_edge_kind_partitions_deterministic_and_inferred(ingested, ir, summary_payload):
+    """The no-laundering separation as a partition: every edge carries exactly one
+    edge_kind, deterministic ⊎ inferred == total, no nulls. Layering the inferred
+    (summary) layer on top leaves the deterministic layer's count untouched."""
+    from palimpsest.kg import load_summaries
+
+    # Deterministic-only baseline.
+    total0, det0, inferred0, missing0 = _edge_kind_counts(ingested)
+    expected_det = sum(expected_rel_counts(ir).values())
+    assert det0 == total0 == expected_det > 0
+    assert inferred0 == 0 and missing0 == 0
+
+    # Load the inferred layer on top.
+    res = load_summaries(ingested, [summary_payload])
+    assert res.loaded == 1
+
+    total, deterministic, inferred, missing = _edge_kind_counts(ingested)
     assert missing == 0
+    assert deterministic + inferred == total          # partition, no overlap/gap
+    assert inferred > 0
+    assert deterministic == expected_det              # deterministic layer unchanged
+
+    # Every SUMMARIZES edge is inferred; no SUMMARIZES edge is deterministic.
+    with ingested.session() as session:
+        summarizes_total = session.run(
+            "MATCH ()-[r:SUMMARIZES]->() RETURN count(r) AS c"
+        ).single()["c"]
+        summarizes_inferred = session.run(
+            "MATCH ()-[r:SUMMARIZES]->() WHERE r.edge_kind = 'inferred' "
+            "RETURN count(r) AS c"
+        ).single()["c"]
+    assert summarizes_inferred == summarizes_total == inferred > 0
 
 
 def test_every_edge_carries_provenance_and_freshness(ingested, ir):

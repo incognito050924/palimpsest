@@ -9,7 +9,8 @@ Two stdlib-argparse subcommands wire the deterministic slice end to end:
   query SYMBOL_OR_FILE [--depth N] [--limit M]
       Run bounded, grounded recall from a seed (a symbol qualified_name or a
       repo-relative file path) and print the result as clearly SEPARATED
-      sections — items (each with its commit + file:line source), gaps, and
+      sections — items (each with its commit + file:line source), inferred
+      summaries (in their own channel, never merged into items), gaps, and
       confidence — never a merged prose answer.
 
 The Neo4j connection comes from the environment (localhost defaults):
@@ -83,6 +84,16 @@ def _print_result(symbol, depth, limit, result) -> None:
         role = "seed" if it["relation"] is None else f"via {it['relation']} @depth {it['depth']}"
         print(f"  - {it['kind']} {it['qualified_name'] or it['id']}  [{role}]")
         print(f"      source: {_fmt_source(it['sources'])}")
+    print()
+    summaries = result.get("summaries", [])
+    print(f"SUMMARIES ({len(summaries)})")
+    if not summaries:
+        print("  (none)")
+    for s in summaries:
+        print(f"  - inferred summary of {s['target_id']}  [bound {s['code_bound_at']}]")
+        for c in s["claims"]:
+            refs = ", ".join(c.get("source_refs", []))
+            print(f"      {c['text']}  (grounds: {refs})")
     print()
     gaps = result["gaps"]
     print(f"GAPS ({len(gaps)})")
