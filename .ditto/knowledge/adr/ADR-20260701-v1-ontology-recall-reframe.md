@@ -16,7 +16,7 @@
 
 1. **v1 deliverable = KG 온톨로지 구축 + GraphRAG 근거결박 점진 회상.** 코드베이스를 캡처→KG 온톨로지(Preserve+Relate)로 만들고, 질의하면 그래프 순회로 관련 코드·의존을 출처(커밋/file:line) 붙여 점진 회상한다(Recall+Curate 조합형). 성공 기준 = 온톨로지 구축·동작 보장; 회상 퀄리티·랭킹은 유예.
 2. **설계위험 감지는 slice 2로 유예.** 전이적 결합(CALLS/DEPENDS_ON) 순회는 v1에서 "위험 판정"이 아니라 "구조적 관계/영향 회상"으로 실현된다; "위험" 판정 라벨은 다음 슬라이스에서 이 본체 위에 얹는다.
-3. **v1은 결정론적 구조층만.** 생성형 LLM 합성·semantic 요약(GraphRAG community report)·inferred 엣지는 유예. Curate는 조합형만(회상 경로에 LLM 없음).
+3. **v1은 결정론적 구조층만.** 생성형 LLM 합성·semantic 요약(GraphRAG community report)·inferred 엣지는 유예. Curate는 조합형만(회상 경로에 LLM 없음). → **후속(slice 4)**: 이 유예된 semantic 층의 적재 계약을 `ADR-20260701-semantic-layer-load-contract`가 실현한다(supersede 아님 — 본 ADR은 계속 active, 그 ADR이 후속을 구체화).
 
 ## v1에서 실현·검증된 기술 결정 (code = SoT: `src/palimpsest/`)
 

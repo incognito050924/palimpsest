@@ -14,14 +14,19 @@ agreed terms, and learnings over time.
 - **GraphRAG (회상층)** — KG 위 그래프탐색+벡터+LLM 합성 회상층, 출력은 근거 결박(출처+gap+confidence).
 - **design-risk slice** — v1 첫 수직 슬라이스(브랜치 간 설계위험 감지).
 - **Code Property Graph (CPG)** — 코드 정적분석을 담는 language-agnostic property graph(노드=타입+속성, 라벨 엣지, 다중 엣지). 정적층 온톨로지 출발점.
-- **edge_kind** — KG 엣지의 출처·신뢰 분리축: deterministic(구조) vs inferred(LLM 추론·confidence 게이팅). 세탁 금지를 스키마로 강제.
+- **edge_kind** — KG 엣지의 출처·신뢰 분리축: deterministic(구조) vs inferred(외부 에이전트/LLM 추론·confidence 게이팅, 예: SUMMARIZES). 세탁 금지(결정론 writer verbatim 재사용 금지)를 writer+테스트로 강제(deterministic⊎inferred==total ∧ NULL==0). slice 4에서 inferred 첫 적재.
 - **Episode (provenance 노드)** — git commit/SourceCommit을 가리키는 ground-truth 노드. 모든 inferred 엣지가 역참조되는 provenance 앵커.
+- **Summary (node)** — 의미층 노드. 외부 에이전트가 생성한 tacit '왜·함정' 요약. id는 `summary:<sha256>` 네임스페이스라 코드 노드와 충돌 불가.
+- **SUMMARIZES (edge)** — Summary→코드 노드 추론 엣지(edge_kind='inferred'). 회상 traversal 화이트리스트 제외 → 'summaries' 분리 채널로만 노출.
+- **의미층 (semantic layer)** — v1 결정론 구조층 위에 얹는 생성형 지식층. slice 4가 첫 적재 계약을 실현(ADR-20260701-semantic-layer-load-contract).
 
 전체 정의는 `glossary.json` 참조.
 
 ## 결정 (ADR headline)
 
 - **ADR-20260626-foundational-architecture** (active) — palimpsest 정초 아키텍처: 본체 = Knowledge Graph, 회상·합성 = GraphRAG(KG 의존), 이력 전부 보존, 캡처 자동 기본. → `adr/ADR-20260626-foundational-architecture.md`
+- **ADR-20260701-v1-ontology-recall-reframe** (active) — v1 첫 슬라이스 재프레임: 설계위험 감지 → KG 온톨로지 구축 + GraphRAG 근거결박 회상. v1은 결정론 구조층만, 생성형·inferred는 유예. → `adr/ADR-20260701-v1-ontology-recall-reframe.md`
+- **ADR-20260701-semantic-layer-load-contract** (active) — palimpsest 의미층 적재 계약: provider-free(LLM 호출 0), 외부 요약을 근거결박·edge_kind='inferred' 분리·provenance 강제로 적재, 회상은 'summaries' 분리 채널. → `adr/ADR-20260701-semantic-layer-load-contract.md`
 
 ## v1 초점
 

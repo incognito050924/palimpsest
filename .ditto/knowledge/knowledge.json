@@ -1,10 +1,23 @@
 {
   "schema_version": "0.1.0",
   "project_name": "palimpsest",
-  "updated_at": "2026-06-30T00:00:00.000Z",
+  "updated_at": "2026-07-01T00:00:00.000Z",
   "context_path": ".ditto/knowledge/CONTEXT.md",
   "glossary_path": ".ditto/knowledge/glossary.json",
-  "patterns": [],
-  "learnings": [],
+  "project_map_path": null,
+  "patterns": [
+    {
+      "name": "inferred-writer-no-verbatim-reuse",
+      "summary": "추론/생성형(inferred) writer는 결정론 writer를 verbatim 재사용하지 말 것 — 멱등 구조(MERGE-on-id, 라벨별 CONSTRAINT)만 재사용하고 provenance·거부 로직은 별도 신설한다. 결정론 MATCH-MATCH-MERGE는 endpoint 미해소 시 무성 드롭이라 근거결박 '거부' 계약과 충돌하고, git provenance(committed_at)는 외부 생성물에 의미가 없다.",
+      "path": "src/palimpsest/kg/summary.py"
+    }
+  ],
+  "learnings": [
+    {
+      "summary": "계약 경계(결정론 merge·라벨 uniqueness·provenance·테스트 계약)를 건드리는 슬라이스는 구현 전 far-field coverage 스윕이 실질 블로커(무성 드롭·Summary id가 코드 노드 가림·provenance 오염·exact-set 테스트 두 곳 파손·edge_kind 분리 테스트 파손)를 required-fix로 선접어 구현 후 escape 0.",
+      "evidence": [{"kind": "note", "command": "wi_260701cjf slice 4 far-field coverage sweep (17 categories, 3-group adversarial)"}],
+      "learned_at": "2026-07-01T00:00:00.000Z"
+    }
+  ],
   "projected_to_claude_md": true
 }

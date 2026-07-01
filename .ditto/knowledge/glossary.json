@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1.0",
   "project_name": "palimpsest",
-  "updated_at": "2026-06-30T00:00:00.000Z",
+  "updated_at": "2026-07-01T00:00:00.000Z",
   "entries": [
     {
       "term": "palimpsest",
@@ -35,7 +35,7 @@
     },
     {
       "term": "edge_kind",
-      "definition": "KG 엣지의 출처·신뢰를 구분하는 1급 분리축 — deterministic(코드 정적분석에서 결정론적으로 재생성되는 구조 엣지) vs inferred(LLM이 생성하고 confidence로 게이팅되는 추론 엣지). 정적∪생성형을 한 그래프에 두되 '세탁 금지'를 스키마로 강제.",
+      "definition": "KG 엣지의 출처·신뢰를 구분하는 1급 분리축 — deterministic(코드 정적분석에서 결정론적으로 재생성되는 구조 엣지) vs inferred(외부 에이전트/LLM이 생성해 confidence로 게이팅되는 추론 엣지, 예: SUMMARIZES). 정적∪생성형을 한 그래프에 두되 '세탁 금지'(결정론 writer verbatim 재사용 금지)를 강제한다. Neo4j Community가 관계 속성 제약을 못 걸어 DB 스키마가 아니라 writer+테스트로 강제(deterministic⊎inferred==total ∧ NULL==0). slice 4(ADR-20260701-semantic-layer-load-contract)에서 inferred 값이 처음 적재됨.",
       "status": "agreed",
       "agreed_at": "2026-06-30T00:00:00.000Z"
     },
@@ -44,6 +44,24 @@
       "definition": "ingest된 원시 데이터(= git commit / SourceCommit)를 가리키는 ground-truth 노드. 모든 inferred 엣지가 역참조되는 provenance 앵커(git=SoT와 정합). 출처 Graphiti.",
       "status": "agreed",
       "agreed_at": "2026-06-30T00:00:00.000Z"
+    },
+    {
+      "term": "Summary (node)",
+      "definition": "의미층 노드 — 외부 에이전트가 생성한 tacit '왜·함정' 요약을 담는다. 코드에서 결정론적으로 추출되지 않는 지식(설계 의도·함정·배경). id는 `summary:<sha256>` 네임스페이스라 코드 노드 qualified_name과 충돌 불가(요약 id가 코드 노드를 가리지 않음).",
+      "status": "agreed",
+      "agreed_at": "2026-07-01T00:00:00.000Z"
+    },
+    {
+      "term": "SUMMARIZES (edge)",
+      "definition": "Summary→코드 노드 추론 엣지. edge_kind='inferred'. 회상 traversal 화이트리스트에서 제외돼 items로 누출되지 않고, 회상에서 'summaries' 분리 채널로만 노출된다.",
+      "status": "agreed",
+      "agreed_at": "2026-07-01T00:00:00.000Z"
+    },
+    {
+      "term": "의미층 (semantic layer)",
+      "definition": "v1 결정론 구조층(코드→KG) 위에 얹는 생성형 지식층. 외부 에이전트가 생성한 요약(Summary 노드)을 근거결박·edge_kind='inferred' 분리·provenance 강제로 그래프에 적재한다. slice 4(ADR-20260701-semantic-layer-load-contract)가 그 첫 적재 계약을 실현.",
+      "status": "agreed",
+      "agreed_at": "2026-07-01T00:00:00.000Z"
     }
   ]
 }
