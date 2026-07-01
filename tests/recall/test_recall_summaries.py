@@ -126,3 +126,84 @@ def test_author_is_not_exposed_in_the_summaries_channel(summarized_db):
         assert "author" not in s
         for r in s["refs"]:
             assert "author" not in r
+
+
+# --- #4 staleness (detect/flag only) -------------------------------------
+
+STALE_GENERATOR = GENERATOR + "-stale"  # distinct id-space from summarized_db
+
+
+@pytest.fixture
+def stale_db(recall_db):
+    """Two in-budget summaries for staleness detection, both bound at the fixture
+    commit (so stale=False on load):
+
+    * one on the seed ``CTRL_METHOD``, and
+    * one on the ``CTRL`` class (reachable via CONTAINS at depth 1).
+
+    A distinct generator keeps these in their own summary-id space, so they never
+    collide with the ``summarized_db`` fixtures in the shared session graph.
+    """
+    method_summary = Summary(
+        target_id=CTRL_METHOD,
+        claims=(SummaryClaim(text="Selects attendance-condition rows.",
+                             source_refs=(CTRL_METHOD,)),),
+        generator=STALE_GENERATOR, model=MODEL, source_commit=SOURCE_COMMIT,
+        created_at="2026-07-01T09:00:00+09:00",
+    )
+    class_summary = Summary(
+        target_id=CTRL,
+        claims=(SummaryClaim(text="The commute controller.",
+                             source_refs=(CTRL,)),),
+        generator=STALE_GENERATOR, model=MODEL, source_commit=SOURCE_COMMIT,
+        created_at="2026-07-01T09:00:00+09:00",
+    )
+    res = load_summaries(recall_db, [method_summary, class_summary])
+    assert res.loaded == 2, res.rejections
+    return recall_db
+
+
+def _stale_entries(out):
+    method_sum = next(s for s in out["summaries"]
+                      if s["target_id"] == CTRL_METHOD
+                      and s["id"].startswith("summary:"))
+    class_sum = next(s for s in out["summaries"] if s["target_id"] == CTRL)
+    return method_sum, class_sum
+
+
+def test_summaries_channel_exposes_stale_boolean_false_on_fresh_load(stale_db):
+    # ac-1: every summaries entry carries a `stale` boolean; freshly loaded
+    # summaries (code_bound_at == the target's current committed_at) are not stale.
+    out = recall(stale_db, CTRL_METHOD, depth=1, limit=25)
+    assert out["summaries"]
+    for s in out["summaries"]:
+        assert isinstance(s["stale"], bool)
+        assert s["stale"] is False
+
+
+def test_stale_flips_when_target_is_recommitted(stale_db):
+    # ac-2: re-ingesting the TARGET at a newer commit (its committed_at advances)
+    # flags THAT summary stale, while an unchanged target's summary stays fresh.
+    driver = stale_db
+    new_committed_at = "2026-07-02T10:00:00+09:00"
+
+    with driver.session() as s:
+        original = s.run(
+            "MATCH (n {id: $id}) RETURN n.committed_at AS c", id=CTRL_METHOD
+        ).single()["c"]
+
+    method_sum, class_sum = _stale_entries(recall(driver, CTRL_METHOD, 1, 25))
+    assert method_sum["stale"] is False and class_sum["stale"] is False  # baseline
+
+    try:
+        with driver.session() as s:
+            s.run("MATCH (n {id: $id}) SET n.committed_at = $c",
+                  id=CTRL_METHOD, c=new_committed_at)
+
+        method_sum, class_sum = _stale_entries(recall(driver, CTRL_METHOD, 1, 25))
+        assert method_sum["stale"] is True   # target re-committed -> out of date
+        assert class_sum["stale"] is False   # untouched target stays fresh
+    finally:
+        with driver.session() as s:
+            s.run("MATCH (n {id: $id}) SET n.committed_at = $c",
+                  id=CTRL_METHOD, c=original)

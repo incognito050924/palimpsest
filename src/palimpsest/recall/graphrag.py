@@ -171,11 +171,23 @@ def _neighbors(driver, ids, rels, limit):
         return [r.data() for r in rows]
 
 
+def _stale(code_bound_at, target_committed_at) -> bool:
+    """#4 detect-only freshness flag. A summary is stale when the target code node
+    has been re-committed since the summary was bound: its current ``committed_at``
+    differs from the summary's ``code_bound_at`` (equal at load by construction —
+    see kg/summary.py). When either is missing, freshness is undeterminable, so we
+    do NOT claim staleness (stale=False). Pure comparison — no LLM, no regeneration."""
+    if code_bound_at is None or target_committed_at is None:
+        return False
+    return target_committed_at != code_bound_at
+
+
 def _summary_channel(rows) -> list:
     """Group flat (summary, grounded-ref) rows into the separate summaries
     channel: one entry per Summary, each with its grounding refs (author-omitted,
-    via :func:`_sources`), the bound commit (``code_bound_at``) and the inferred
-    ``edge_kind`` marker. The summary text stays here — never merged into items."""
+    via :func:`_sources`), the bound commit (``code_bound_at``), the inferred
+    ``edge_kind`` marker and the ``stale`` freshness flag. The summary text stays
+    here — never merged into items."""
     by_id: dict = {}
     for row in rows:
         entry = by_id.get(row["id"])
@@ -187,9 +199,15 @@ def _summary_channel(rows) -> list:
                 "edge_kind": row["edge_kind"],      # inferred marker, from the edge
                 "code_bound_at": row["code_bound_at"],  # bound commit (freshness)
                 "refs": [],
+                # Filled once the target's own grounded row is seen (below); the
+                # target ref is always present (kg/summary.py grounds the target).
+                "stale": False,
             }
             by_id[row["id"]] = entry
         entry["refs"].append({"id": row["ref_id"], **_sources(row)})
+        # The freshness bound follows the TARGET node's current committed_at.
+        if row["ref_id"] == entry["target_id"]:
+            entry["stale"] = _stale(entry["code_bound_at"], row["committed_at"])
     return list(by_id.values())
 
 
