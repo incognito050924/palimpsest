@@ -69,7 +69,7 @@
 ## 5. 노출 / 통합
 
 - ⬜ **메커니즘 미결:** MCP 서버 / 스킬 등록 / ditto-pluggable. Python 주언어는 셋 다 가능(MCP Python SDK · 언어 무관 스킬). (VISION §다음단계 #5)
-- ◐ **현재 노출:** CLI(`python -m palimpsest ingest|query`) ✅. **요약 실적재 진입점(CLI load-summaries)은 진행 중**(wi_2607016ir) — 외부 생성 요약 payload를 적재하는 경로. MCP/스킬은 유예.
+- ✅ **현재 노출:** CLI(`python -m palimpsest ingest|query|load`). **요약 실적재 진입점(CLI `load`)은 실현**(wi_2607016ir, 커밋 `6197c80`) — 외부 생성 요약 JSON payload를 적재(근거결박·summary-atomic 거부 유지, rejections 표면화, provider-free). MCP/스킬은 유예.
 - ✅ **소비자 일반화:** 개발자(사람) + 에이전트. ditto는 **첫 소비자일 뿐**, 노출을 ditto에 특화하지 않는다.
 - 🔶 **회상 계약(제안):** `query(작업 맥락) → grounded answer(출처+gap+confidence) + 점진 확장 핸들`. 사람용(설명형)·에이전트용(토큰 맞춘 근거 조각) 양면.
 
@@ -78,7 +78,7 @@
 - ✅ **v1 = 온톨로지 + grounded 회상 slice** (`wi_2606263sn`, **shipped·검증 통과**, ADR-20260701-v1-ontology-recall-reframe): 코드베이스(EcoleTree Java monolith)를 캡처→KG 온톨로지→GraphRAG로 관련 코드·의존을 **출처 붙여 점진 회상**. 성공 = **온톨로지 구축·동작 보장**(실코퍼스 158파일 e2e + 테스트 + 독립 verify), 회상 퀄리티는 다음. code=SoT: `src/palimpsest/`. *(재프레임 전 v1 후보였던 "설계위험 감지"는 slice 2로 유예.)*
 - ✅ **slice 4 = 의미층 첫 적재 계약** (`wi_260701cjf`, **shipped·검증 통과**, ADR-20260701-semantic-layer-load-contract): 외부 생성 tacit 요약을 `Summary` 노드 + `SUMMARIZES`(inferred)로 **근거결박·inferred 분리·provenance 강제**로 적재. provider-free. 회상은 'summaries' 분리 채널. code=SoT: `src/palimpsest/kg/summary.py`.
 
-- ◐ **현재 진행 슬라이스** (`wi_2607016ir`): **recall correctness + 요약 실적재 경로** — ① recall `_RESOLVE` label-free MATCH id 충돌 해소(#5) · ② 순회 예산 server-side bound(#6, Cypher LIMIT push-down) · ③ 외부 생성 요약을 실제로 적재하는 CLI 진입점 신설(provider-free 유지). *근거: 현재 그래프에 적재된 요약이 0이고 적재 진입점조차 없어, 의미층 후속(아래 유예)의 실사용 전제를 먼저 세운다.* (intent.json)
+- ✅ **recall correctness + 요약 실적재 경로** (`wi_2607016ir`, **shipped·검증 통과**, 커밋 `6197c80`): ① recall `_RESOLVE`에 `ORDER BY head(labels(n))` — label-free MATCH id 충돌 해소(#5) · ② `_NEIGHBORS`/`_SUMMARIES`에 `ORDER BY` 뒤 `LIMIT` — 순회 예산 server-side bound, 정상 노드 동등성 유지(#6) · ③ 외부 생성 요약을 실제로 적재하는 CLI `load` 진입점 신설(provider-free 유지). 검증: 전체 39 passed, 4 AC evidence-gated. code=SoT: `src/palimpsest/{recall/graphrag.py,cli.py,ir.py}`. *근거: 의미층 후속(아래 유예)의 실사용 전제(적재 경로)를 먼저 세운다.*
 
 - 🔶 **유예된 의미층 후속** — 실적재 경로로 실제 사용·고통을 확인하고 각 ADR change-condition을 재검토한 뒤 착수:
 
@@ -109,7 +109,7 @@
 - ◐ **node/edge 설계** — 정적/결정론층 v1 실현 + 의미층 첫 적재 slice 4 실현(§2-bis). 남은 미결: derived/inferred 엣지 생성 메커니즘 · LLM 추론 엣지 precision 가드레일(내용 검증, 유예 #1) · CPG intra-procedural → cross-branch 확장 · 코드-결박 신선도 stale 판정·재조정(유예 #4). → `docs/research/precompute-hugrag-kg.md`.
 - ◐ **스키마 상세** — 정적 엔티티/관계 + Summary/SUMMARIZES는 실현(code=SoT). 의미층 나머지 노드(`Risk`/`DesignDecision`/`Community`, 유예 #3)·신선도 2축(`valid_from/valid_to` 결정-계보)·`Risk` 노드 vs 관계는 미결.
 - ◐ **요약 durability** — Neo4j-only, git-SoT 재구축 계약 미결(유예 #2).
-- ⬜ **recall boundedness/정확성** — `_RESOLVE` label-free id 충돌·순회 예산 client-side(현재 진행 wi_2607016ir에서 해소 중).
+- ✅ **recall boundedness/정확성** — `_RESOLVE` label-free id 충돌·순회 예산 client-side를 **해소**(wi_2607016ir, 커밋 `6197c80`): 결정적 tie-break + server-side Cypher `LIMIT`. `_SUMMARIES` row-bound 정책(병리적 고요약 노드에서 distinct summary vs row 단위)은 후속 여지.
 - ⬜ **임베딩 설계** — 부착 대상·차원·하이브리드 검색 구성(v1 미포함).
 - ✅ **데모 코퍼스 (v1)** — `EcoleTreeSystems`(Java monolith) 확정·사용. 두 브랜치 설계위험 시나리오는 slice 2에서. *(주의: EcoleTreeSystems repo에 대한 git 작업 금지 — 읽기 전용 코퍼스.)*
 - ⬜ **성능** — ingest·순회·벡터검색·재구축·메모리(스파이크 §4 지표, 미측정).
