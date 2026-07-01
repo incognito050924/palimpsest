@@ -11,7 +11,7 @@ import json
 import pytest
 
 from palimpsest.ir import METHOD, Summary, SummaryClaim
-from palimpsest.kg import load_summaries
+from palimpsest.kg import load_summaries, summary_id
 from palimpsest.recall import recall
 
 CTRL = "kr.co.ecoletree.service.commute.controller.CommuteController"
@@ -126,6 +126,34 @@ def test_author_is_not_exposed_in_the_summaries_channel(summarized_db):
         assert "author" not in s
         for r in s["refs"]:
             assert "author" not in r
+
+
+# --- semantic verdict (ingest-only, annotate — never a reject path) -----------
+
+VERDICT_GENERATOR = GENERATOR + "-verdict"  # distinct summary-id space
+
+
+def test_unfaithful_verdict_loads_and_surfaces_in_summaries_channel(recall_db):
+    """An external judge's 'unfaithful' verdict does NOT reject the summary — it
+    LOADS and the recall summaries channel exposes the verdict as a flag (annotate,
+    like `stale`). palimpsest itself never judges; it only ingests the verdict."""
+    verdict = {"verdict": "unfaithful", "judge": "ditto", "model": "judge-model-v1"}
+    s = Summary(
+        target_id=CTRL_METHOD,
+        claims=(SummaryClaim(text="Selects attendance-condition rows.",
+                             source_refs=(CTRL_METHOD,)),),
+        generator=VERDICT_GENERATOR, model=MODEL, source_commit=SOURCE_COMMIT,
+        created_at="2026-07-01T09:00:00+09:00",
+        semantic_verdict=verdict,
+    )
+    res = load_summaries(recall_db, [s])
+    # Annotate, not reject: an unfaithful verdict still loads.
+    assert res.loaded == 1 and res.rejected == 0, res.rejections
+
+    sid = summary_id(CTRL_METHOD, VERDICT_GENERATOR, MODEL, SOURCE_COMMIT)
+    out = recall(recall_db, CTRL_METHOD, depth=1, limit=25)
+    entry = next(e for e in out["summaries"] if e["id"] == sid)
+    assert entry["semantic_verdict"] == verdict
 
 
 # --- #4 staleness (detect/flag only) -------------------------------------

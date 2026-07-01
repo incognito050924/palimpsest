@@ -198,6 +198,11 @@ class Summary:
     created_at: str
     prompt: Optional[str] = None
     confidence: Optional[float] = None
+    # An EXTERNAL judge's semantic verdict (e.g. ditto), NOT the generator's
+    # self-report — kept on its own field, never overloading ``confidence``.
+    # ``{"verdict": "faithful"|"unfaithful"|"unverified", "judge": str, "model": str}``.
+    # palimpsest never produces this; it only ingests it. Absent -> None (unverified).
+    semantic_verdict: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -209,6 +214,7 @@ class Summary:
             "created_at": self.created_at,
             "prompt": self.prompt,
             "confidence": self.confidence,
+            "semantic_verdict": self.semantic_verdict,
         }
 
     @classmethod
@@ -222,4 +228,5 @@ class Summary:
             created_at=data["created_at"],
             prompt=data.get("prompt"),
             confidence=data.get("confidence"),
+            semantic_verdict=data.get("semantic_verdict"),
         )

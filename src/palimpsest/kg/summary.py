@@ -76,6 +76,7 @@ SET s.target_id     = $target_id,
     s.created_at    = $created_at,
     s.code_bound_at = $code_bound_at,
     s.confidence    = $confidence,
+    s.semantic_verdict = $semantic_verdict,
     s.prompt        = $prompt
 """
 
@@ -138,6 +139,13 @@ def _committed_at(session, node_id: str):
 
 def _write(session, sid: str, s: Summary, endpoints: set[str], code_bound_at) -> None:
     claims = [json.dumps(c.to_dict(), ensure_ascii=False) for c in s.claims]
+    # Neo4j properties are primitives/arrays, not maps, so the external judge's
+    # verdict is stored as a JSON string (like claims); recall parses it back.
+    semantic_verdict = (
+        json.dumps(s.semantic_verdict, ensure_ascii=False)
+        if s.semantic_verdict is not None
+        else None
+    )
     session.run(
         _SUMMARY_MERGE,
         id=sid,
@@ -149,6 +157,7 @@ def _write(session, sid: str, s: Summary, endpoints: set[str], code_bound_at) ->
         created_at=s.created_at,
         code_bound_at=code_bound_at,
         confidence=s.confidence,
+        semantic_verdict=semantic_verdict,
         prompt=s.prompt,
     )
     session.run(

@@ -92,7 +92,8 @@ MATCH (s:Summary)-[:SUMMARIZES]->({id: anchor_id})
 WITH DISTINCT s
 MATCH (s)-[r:SUMMARIZES]->(g)
 RETURN s.id AS id, s.target_id AS target_id, s.claims AS claims,
-       s.code_bound_at AS code_bound_at, r.edge_kind AS edge_kind,
+       s.code_bound_at AS code_bound_at, s.semantic_verdict AS semantic_verdict,
+       r.edge_kind AS edge_kind,
        g.id AS ref_id, g.source_commit AS source_commit, g.path AS path,
        g.start_line AS start_line, g.end_line AS end_line,
        g.committed_at AS committed_at
@@ -198,6 +199,14 @@ def _summary_channel(rows) -> list:
                 "claims": [json.loads(c) for c in (row["claims"] or [])],
                 "edge_kind": row["edge_kind"],      # inferred marker, from the edge
                 "code_bound_at": row["code_bound_at"],  # bound commit (freshness)
+                # External judge's verdict (annotate-only flag), parsed from its
+                # stored JSON; absent -> None (treated as unverified). palimpsest
+                # never judges — it only surfaces what an external judge ingested.
+                "semantic_verdict": (
+                    json.loads(row["semantic_verdict"])
+                    if row.get("semantic_verdict")
+                    else None
+                ),
                 "refs": [],
                 # Filled once the target's own grounded row is seen (below); the
                 # target ref is always present (kg/summary.py grounds the target).

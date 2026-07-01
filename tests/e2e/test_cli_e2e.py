@@ -204,6 +204,49 @@ def test_e2e_rebuild_from_git_payload_dir_restores_summaries(cli_env, tmp_path):
     assert after == before  # same deterministic ids, same edges restored
 
 
+# --- semantic verdict rides the git payload + survives a Neo4j drop→reload ------
+
+
+def test_e2e_semantic_verdict_survives_drop_and_reload(cli_env, tmp_path):
+    """The externally-produced semantic verdict rides on the git-tracked payload,
+    so a DETACH DELETE of the inferred layer + reload from the same dir restores it
+    (git = SoT, Neo4j = rebuildable projection). Verdict is not in the summary id."""
+    assert cli.main(["ingest", "--repo", str(FIXTURES)]) == 0
+
+    verdict = {"verdict": "unfaithful", "judge": "ditto", "model": "judge-model-v1"}
+    payload = _summary_dict(CTRL_METHOD, [CTRL_METHOD, SVC_METHOD])
+    payload["semantic_verdict"] = verdict
+    payload_dir = tmp_path / "summaries"
+    payload_dir.mkdir()
+    (payload_dir / "v.json").write_text(json.dumps([payload]))
+    assert cli.main(["load", str(payload_dir)]) == 0
+
+    driver = cli_env.get_driver()
+
+    def stored_verdict():
+        with driver.session() as session:
+            rec = session.run(
+                "MATCH (s:Summary {target_id: $t}) RETURN s.semantic_verdict AS v",
+                t=CTRL_METHOD,
+            ).single()
+        return rec["v"] if rec else None
+
+    try:
+        first = stored_verdict()
+        assert first is not None and json.loads(first) == verdict
+
+        with driver.session() as session:
+            session.run("MATCH (s:Summary) DETACH DELETE s")
+        assert stored_verdict() is None
+
+        assert cli.main(["load", str(payload_dir)]) == 0
+        after = stored_verdict()
+    finally:
+        driver.close()
+
+    assert after is not None and json.loads(after) == verdict
+
+
 # --- ac-4: the CLI load path imports NO generative module (provider-free) ------
 
 

@@ -72,6 +72,42 @@ def test_load_creates_summary_and_inferred_summarizes_edge(
     assert code_labelled_summary == 0
 
 
+# --- ac-1: the semantic verdict is a dedicated field, separate from confidence --
+
+
+def test_semantic_verdict_round_trips_separate_from_confidence():
+    """The external judge's verdict rides on its OWN field (not `confidence`, which
+    is the generator's self-report) and round-trips through to_dict/from_dict."""
+    verdict = {"verdict": "unfaithful", "judge": "ditto", "model": "judge-model-v1"}
+    s = Summary(
+        target_id="pkg.Cls#m()",
+        claims=(SummaryClaim(text="c", source_refs=("pkg.Cls#m()",)),),
+        generator="g", model="m", source_commit="deadbeef",
+        created_at="2026-07-01T00:00:00Z",
+        confidence=0.9,
+        semantic_verdict=verdict,
+    )
+    d = s.to_dict()
+    # Distinct fields, not overloaded.
+    assert d["semantic_verdict"] == verdict
+    assert d["confidence"] == 0.9
+
+    back = Summary.from_dict(d)
+    assert back.semantic_verdict == verdict
+    assert back.confidence == 0.9
+
+
+def test_semantic_verdict_absent_defaults_to_none_backward_compatible():
+    """A legacy payload without the field still loads (verdict -> None)."""
+    legacy = {
+        "target_id": "pkg.Cls#m()",
+        "claims": [{"text": "c", "source_refs": ["pkg.Cls#m()"]}],
+        "generator": "g", "model": "m", "source_commit": "deadbeef",
+        "created_at": "2026-07-01T00:00:00Z",
+    }
+    assert Summary.from_dict(legacy).semantic_verdict is None
+
+
 # --- provenance: freshness follows the code, not the generator's wall-clock ---
 
 
