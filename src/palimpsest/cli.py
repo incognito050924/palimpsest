@@ -13,6 +13,13 @@ Two stdlib-argparse subcommands wire the deterministic slice end to end:
       summaries (in their own channel, never merged into items), gaps, and
       confidence — never a merged prose answer.
 
+  load PAYLOAD.json
+      Load an externally-produced summary JSON payload (an array of summary
+      objects) into the inferred layer via grounded, summary-atomic load. Prints
+      the loaded count and EVERY rejection reason — rejections are surfaced,
+      never silently dropped. palimpsest calls no model; the payload is generated
+      elsewhere.
+
 The Neo4j connection comes from the environment (localhost defaults):
   NEO4J_URI (bolt://localhost:7687), NEO4J_USER (neo4j), NEO4J_PASSWORD (neo4j).
 """
@@ -20,6 +27,7 @@ The Neo4j connection comes from the environment (localhost defaults):
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from contextlib import contextmanager
@@ -27,7 +35,8 @@ from contextlib import contextmanager
 from neo4j import GraphDatabase
 
 from palimpsest.extract import extract, read_provenance
-from palimpsest.kg import create_constraints, ingest
+from palimpsest.ir import Summary
+from palimpsest.kg import create_constraints, ingest, load_summaries
 from palimpsest.recall import recall
 
 DEFAULT_URI = "bolt://localhost:7687"
@@ -63,6 +72,21 @@ def _cmd_query(args) -> None:
     with _driver() as driver:
         result = recall(driver, args.symbol, depth=args.depth, limit=args.limit)
     _print_result(args.symbol, args.depth, args.limit, result)
+
+
+def _cmd_load(args) -> None:
+    with open(args.payload, encoding="utf-8") as f:
+        summaries = [Summary.from_dict(d) for d in json.load(f)]
+    with _driver() as driver:
+        result = load_summaries(driver, summaries)
+    _print_load_result(args.payload, result)
+
+
+def _print_load_result(path, result) -> None:
+    print(f"LOADED {result.loaded}/{result.intended} summaries from {path}")
+    print(f"REJECTED ({result.rejected})")
+    for rej in result.rejections:
+        print(f"  - {rej.summary_id}: {rej.reason}")
 
 
 def _fmt_source(src) -> str:
@@ -128,6 +152,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_q.add_argument("--depth", type=int, default=1, help="max traversal hops (default 1)")
     p_q.add_argument("--limit", type=int, default=25, help="max items (default 25)")
     p_q.set_defaults(func=_cmd_query)
+
+    p_load = sub.add_parser(
+        "load",
+        help="load an externally-produced summary JSON payload (provider-free)",
+    )
+    p_load.add_argument(
+        "payload", help="path to a JSON file: an array of summary objects"
+    )
+    p_load.set_defaults(func=_cmd_load)
     return parser
 
 

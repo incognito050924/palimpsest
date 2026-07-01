@@ -166,6 +166,13 @@ class SummaryClaim:
     def to_dict(self) -> dict:
         return {"text": self.text, "source_refs": list(self.source_refs)}
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "SummaryClaim":
+        return cls(
+            text=data["text"],
+            source_refs=tuple(data.get("source_refs", ())),
+        )
+
 
 @dataclass(frozen=True)
 class Summary:
@@ -203,3 +210,16 @@ class Summary:
             "prompt": self.prompt,
             "confidence": self.confidence,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Summary":
+        return cls(
+            target_id=data["target_id"],
+            claims=tuple(SummaryClaim.from_dict(c) for c in data.get("claims", ())),
+            generator=data["generator"],
+            model=data["model"],
+            source_commit=data["source_commit"],
+            created_at=data["created_at"],
+            prompt=data.get("prompt"),
+            confidence=data.get("confidence"),
+        )

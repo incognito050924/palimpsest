@@ -53,7 +53,14 @@ DEFAULT_RELATIONS = (CALLS, DEPENDS_ON, CONTAINS, IMPORTS)
 # Ontology node labels, in the order we pick a node's primary kind.
 _NODE_LABELS = ("Repo", "Package", "File", "Class", "Method", "Episode")
 
-_RESOLVE = "MATCH (n {id: $id}) RETURN n, labels(n) AS labels LIMIT 1"
+# A query id is label-free, but the uniqueness CONSTRAINT is per (label, id), so
+# two nodes CAN share an id under different labels. Order by label before LIMIT 1
+# so resolution is deterministic and rebuild-stable (lexicographically-smallest
+# label wins) instead of Neo4j's arbitrary scan order.
+_RESOLVE = (
+    "MATCH (n {id: $id}) RETURN n, labels(n) AS labels "
+    "ORDER BY head(labels(n)) LIMIT 1"
+)
 
 # One undirected hop from a set of frontier ids over the requested relations.
 # DISTINCT rows; deterministic order so item selection under a limit is stable.
@@ -66,6 +73,7 @@ RETURN DISTINCT b.id AS id, type(r) AS relation, labels(b) AS labels,
        b.path AS path, b.start_line AS start_line, b.end_line AS end_line,
        b.source_commit AS source_commit, b.committed_at AS committed_at
 ORDER BY id, relation
+LIMIT $lim
 """
 
 # Which of the requested relations actually have an edge on the seed.
@@ -89,6 +97,7 @@ RETURN s.id AS id, s.target_id AS target_id, s.claims AS claims,
        g.start_line AS start_line, g.end_line AS end_line,
        g.committed_at AS committed_at
 ORDER BY id, ref_id
+LIMIT $lim
 """
 
 
@@ -148,14 +157,18 @@ def _resolve(driver, query):
     return data
 
 
-def _neighbors(driver, ids, rels):
+def _neighbors(driver, ids, rels, limit):
     # Traversal whitelist: only the deterministic structural ontology is ever
     # walked. SUMMARIZES (inferred) is not traversable — even if a caller passes
     # it in ``relations`` — so a Summary can never leak into the items channel;
     # it surfaces solely through the separate summaries channel.
+    #
+    # ``limit`` is a server-side row bound (Cypher ``LIMIT``, after the ORDER BY)
+    # so a high-degree node never streams its whole neighbour set to the client.
     rels = [r for r in rels if r in DEFAULT_RELATIONS]
     with driver.session() as session:
-        return [r.data() for r in session.run(_NEIGHBORS, ids=list(ids), rels=rels)]
+        rows = session.run(_NEIGHBORS, ids=list(ids), rels=rels, lim=limit)
+        return [r.data() for r in rows]
 
 
 def _summary_channel(rows) -> list:
@@ -180,13 +193,16 @@ def _summary_channel(rows) -> list:
     return list(by_id.values())
 
 
-def _summaries(driver, items) -> list:
-    """The inferred-summary channel for the recalled ``items`` (already bounded)."""
+def _summaries(driver, items, limit) -> list:
+    """The inferred-summary channel for the recalled ``items`` (already bounded).
+
+    ``limit`` is a server-side row bound (Cypher ``LIMIT``, after the ORDER BY) so
+    a node with many summaries never streams the whole summary set to the client."""
     if not items:
         return []
     ids = [it["id"] for it in items]
     with driver.session() as session:
-        rows = [r.data() for r in session.run(_SUMMARIES, ids=ids)]
+        rows = [r.data() for r in session.run(_SUMMARIES, ids=ids, lim=limit)]
     return _summary_channel(rows)
 
 
@@ -210,7 +226,12 @@ def _hop(driver, frontier, visited, relations, depth, budget):
     order). Returns (items, emitted_ids, truncated)."""
     items, emitted = [], []
     truncated = False
-    for rec in _neighbors(driver, frontier, relations):
+    # Server-side bound: after skipping the (at most ``len(visited)``) already-seen
+    # rows, ``budget`` unvisited must survive, plus one more to detect truncation —
+    # so the first ``budget + |visited| + 1`` ordered rows are provably sufficient
+    # and yield the SAME items/emitted/truncated as reading the whole set.
+    read_limit = budget + len(visited) + 1
+    for rec in _neighbors(driver, frontier, relations, read_limit):
         nid = rec["id"]
         if nid in visited:
             continue
@@ -299,12 +320,16 @@ def recall(driver, query, depth=1, limit=25, relations=None):
         handle = None
 
     gaps = _seed_relation_gaps(driver, query, relations) if explicit_relations else []
-    return _result(items, gaps, handle, _summaries(driver, items))
+    return _result(items, gaps, handle, _summaries(driver, items, limit))
 
 
 def _neighbors_beyond(driver, frontier, visited, relations) -> bool:
-    """True if the frontier has at least one still-unvisited neighbour."""
-    for rec in _neighbors(driver, frontier, relations):
+    """True if the frontier has at least one still-unvisited neighbour.
+
+    An existence check only: the first unvisited row lies within the first
+    ``|visited| + 1`` ordered rows, so that server-side bound suffices — no need
+    to stream the whole neighbour set."""
+    for rec in _neighbors(driver, frontier, relations, len(visited) + 1):
         if rec["id"] not in visited:
             return True
     return False
@@ -336,4 +361,4 @@ def expand(driver, handle, limit=25):
     else:
         next_handle = None
 
-    return _result(new_items, [], next_handle, _summaries(driver, new_items))
+    return _result(new_items, [], next_handle, _summaries(driver, new_items, limit))
