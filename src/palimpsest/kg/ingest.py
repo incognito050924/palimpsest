@@ -66,7 +66,8 @@ MERGE (a)-[r:`{rel}`]->(b)
 SET r.edge_kind     = $edge_kind,
     r.source_commit = row.source_commit,
     r.author        = row.author,
-    r.committed_at  = row.committed_at
+    r.committed_at  = row.committed_at,
+    r.code_bound_at = row.committed_at
 """
 
 _EPISODE_MERGE = """

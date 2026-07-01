@@ -78,6 +78,23 @@ def test_every_edge_carries_edge_kind_deterministic(ingested, ir):
     assert missing == 0
 
 
+def test_every_edge_carries_provenance_and_freshness(ingested, ir):
+    # DESIGN §2-bis / ingest docstring: provenance (source_commit, author) AND
+    # freshness (code_bound_at) are edge properties — none may be null.
+    with ingested.session() as session:
+        total = session.run(
+            "MATCH ()-[r]->() RETURN count(r) AS c"
+        ).single()["c"]
+        missing = session.run(
+            "MATCH ()-[r]->() "
+            "WHERE r.source_commit IS NULL OR r.author IS NULL "
+            "OR r.code_bound_at IS NULL "
+            "RETURN count(r) AS c"
+        ).single()["c"]
+    assert total > 0
+    assert missing == 0
+
+
 def test_method_node_resolves_to_real_code_with_provenance(ingested, ir):
     ir_method = ir.node(SAMPLE_METHOD)
     assert ir_method is not None  # guard the fixture assumption
