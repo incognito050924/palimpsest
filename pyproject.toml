@@ -5,11 +5,24 @@ description = "Project-lifecycle memory & knowledge curator — surfaces the dec
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-dependencies = []
+dependencies = [
+    # Static Java extraction -> IR (n2-impl-extract). tree-sitter-java parses Java
+    # to a concrete syntax tree; py-tree-sitter is the runtime binding.
+    "tree-sitter>=0.23",
+    "tree-sitter-java>=0.23",
+    # KG ingest (n3-impl-kg-ingest). Official Neo4j driver; raw Cypher, batched
+    # UNWIND + MERGE. No neo4j-graphrag (defers LLM-synthesis paths, ac-3).
+    "neo4j>=5.14",
+]
 
-# Dependencies (graph driver, vector/RAG, MCP server, LLM client) are intentionally
-# empty at seed stage. They are added at the first spike once the DB is chosen.
+# Graph driver (neo4j) added at the KG-ingest spike above. vector/RAG, MCP
+# server, LLM client deps stay intentionally empty until their nodes land.
 # See docs/VISION.md §"다음 단계".
+
+[project.optional-dependencies]
+# testcontainers[neo4j] stands up a hermetic Neo4j 5 Community container per
+# test session (auto lifecycle); KG ingest tests run against that live bolt.
+test = ["pytest>=8", "testcontainers[neo4j]>=4", "neo4j>=5.14"]
 
 [build-system]
 requires = ["hatchling"]
@@ -17,3 +30,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/palimpsest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
