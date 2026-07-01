@@ -2,7 +2,7 @@
 
 > 상태: **seed / 정초(scaffold)**. 이 문서는 프로젝트의 정체성(이름·목적·기능)과 *이미 잠긴 전제*를 박는다.
 > MVP 범위·스키마·캡처/회상 메커니즘·DB 택일·통합 형태는 **palimpsest 자체 deep-interview**로 결정한다(아래 §다음 단계).
-> **정초 deep-interview 1회차 완료(wi_2606263sn, 2026-06-26):** Knowledge Graph 본체 + GraphRAG 회상층, 모든 엔티티 1급, 전이력 보존(버려진 대안 포함), 자동 캡처가 확정됐다. v1 첫 슬라이스 = 브랜치 간 설계위험 감지. **권위는 첫 ADR `ADR-20260626-foundational-architecture`와 IntentContract `intent.json`이며, 이 문서는 그 해소 상태를 비추는 배경 지도다(§다음 단계).**
+> **정초 deep-interview 완료(wi_2606263sn):** Knowledge Graph 본체 + GraphRAG 회상층, 모든 엔티티 1급, 전이력 보존(버려진 대안 포함), 자동 캡처가 확정됐다(1회차 2026-06-26). **v1 첫 슬라이스는 재프레임됐다(2026-07-01, ADR-20260701): 코드베이스 → KG 온톨로지 구축 + GraphRAG 근거결박 회상**(설계위험 감지는 slice 2로 유예). **권위는 ADR `ADR-20260626-foundational-architecture`·`ADR-20260701-v1-ontology-recall-reframe`와 IntentContract `intent.json`이며, 이 문서는 그 해소 상태를 비추는 배경 지도다(§다음 단계).**
 > 출처(provenance): ditto repo의 사용자 원본 메모(`memory-system.md`), 시드 스펙(`reports/design/memory-librarian-external-seed-spec.md`), `ADR-0021`, gbrain 비교 연구. 충돌 시 ditto `ADR-0021`이 권위.
 
 ---
@@ -72,7 +72,7 @@ ditto는 palimpsest의 **소비자**다. palimpsest는 MCP 서버(또는 ditto-p
 
 > 1회차 deep-interview(wi_2606263sn, 2026-06-26)의 해소 상태를 각 항목에 표시한다. 권위: `ADR-20260626-foundational-architecture`, `intent.json`. 미정 항목은 이후 deep-interview/스파이크로 좁힌다.
 
-1. **MVP 범위** — ✅ **확정.** 팀(브랜치 간) 우선. v1 첫 슬라이스 = **브랜치 간 설계위험 감지**(팀원의 최근 push가 내 현재 설계에 위험인지 KG+GraphRAG로 근거 붙여 surface). 성공 기준 = 구조·동작 보장, 퀄리티는 다음. (intent.json)
+1. **MVP 범위** — ✅ **확정(2026-07-01 재프레임, ADR-20260701).** v1 첫 슬라이스 = **코드베이스를 KG 온톨로지로 구축 + GraphRAG 근거결박 점진 회상**(질의하면 관련 코드·의존을 출처 붙여 회상). 성공 기준 = 온톨로지 구축·동작 보장, 회상 퀄리티는 다음. **설계위험 감지는 slice 2**(이 본체 위에 얹음). shipped·검증 통과: `src/palimpsest/`(extract→kg→recall→cli). (intent.json)
 2. **스키마** — ◐ **부분.** Knowledge Graph·모든 엔티티 1급·전이력 보존 확정(ADR). 상세 엔티티/관계 모델과 v1 슬라이스용 최소 온톨로지는 미정.
 3. **캡처/회상 메커니즘** — ◐ **부분.** 자동 캡처 기본(실시간/배치/사용자 지시 혼합)·회상 pull 우선 확정. 상세 수집/점진 회상 메커니즘은 미정. (push 능동경고·전체 backfill·에이전트 트레이스 캡처는 확장축)
 4. **그래프 DB 택일 스파이크** — ◐ **1차 좁힘**(wi_2606264gw, 리포트 `docs/spikes/db-substrate-spike.md`). 문서 근거상 **Neo4j Community 1차 + Memgraph 폴백**, Postgres+AGE 제외(커뮤니티 탐지 부재·조립형 미성숙). 통념과 달리 Neo4j 벡터 인덱스·GDS 커뮤니티 탐지는 Community 무료. **성능·메모리·재구축 실측은 스키마+코퍼스 확보 후** 미결.

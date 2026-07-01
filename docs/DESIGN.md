@@ -25,7 +25,9 @@
 - 🔶 **신선도(2축, 제안):** ① **코드-결박 신선도** — 지식이 가리키는 코드 위치·심볼이 현재 커밋에 살아있나 · ② **결정-계보 신선도** — 이 지식이 더 최신 결정에 의해 supersede 됐나(이력은 보존하되 "현재 live" 판정). VISION의 "커밋 해시 기반 2축 신선도"를 이렇게 구체화 제안.
 - ⬜ **미결:** 정확한 2축 정의·계산 · 기억의 입도(granularity) · 임베딩 부착 대상과 차원 · 온톨로지 진화/버전 전략 · `Risk`를 노드로 둘지 관계로 둘지.
 
-### 2-bis. node/edge 스키마 제안 *(연구 반영, 2026-06-30 · 🔶 medium confidence)*
+### 2-bis. node/edge 스키마 — 정적층 ✅ v1 실현 *(2026-07-01, code=SoT · ADR-20260701)*
+
+> ✅ **v1 실현(정적/결정론 층):** 아래 정적층 노드/엣지는 `src/palimpsest/{extract,kg}`에 구현·검증됐다 — `Repo/Package/File/Class/Method`(+`Episode`=commit), `CONTAINS/CALLS/DEPENDS_ON/IMPORTS`, 모든 엣지 `edge_kind='deterministic'`(Neo4j Community라 DB제약이 아닌 **writer+테스트로 강제**), provenance(commit SHA/author)+`code_bound_at`. 회상은 조합형(LLM 없음). **의미층(`Summary/DesignDecision/Risk`)·inferred 엣지·생성형 요약은 미실현(다음 slice).** 아래 표는 그 전체 제안이며 ✅는 v1 실현분, 🔶는 미실현분이다.
 
 1차 자료 종합 — Glean(pre-compute fact)·HugRAG(unified edge space)·CPG/Joern(type-label overlay)·Graphiti(bi-temporal/Episode). 근거·검증(23 confirmed/2 refuted)·출처 전체: [`docs/research/precompute-hugrag-kg.md`](research/precompute-hugrag-kg.md). **충돌 검토: ADR-20260626(KG 본체·GraphRAG 회상·전이력 보존)과 충돌 없음** — 오히려 각 시스템이 우리 모델 조각을 실증.
 
@@ -33,7 +35,7 @@
 - 🔶 **엣지 — 결정론적 구조(`edge_kind=deterministic`, git projection 재생성):** `CONTAINS` · `CALLS` · `REACHING_DEF`(DATAFLOW) · `IMPORTS` · `INHERITS` · `REF`. **생성형 추론(`edge_kind=inferred`, LLM 생성 + confidence 게이팅):** `SUMMARIZES` · `CAUSALLY_RELATES` · `ADDRESSES_RISK` · `DECIDES` · `RELATES_TO`.
 - 🔶 **정적/생성형 분리(세탁 금지):** ① 별도 edge label + ② 모든 엣지에 `edge_kind = deterministic|inferred` 속성 — 2중 표시로 출처·신뢰 혼동 차단.
 - 🔶 **provenance·2축 신선도 = 엣지 속성(Graphiti 패턴):** `source`=Episode/commit SHA(provenance) · `valid_from`/`valid_to`=결정-계보 신선도(삭제 대신 invalidate=전이력 보존) · `code_bound_at`=코드-결박 신선도(연결 심볼의 마지막 git 변경) · inferred일 때 `generator`/`model`/`confidence`/`created_at`.
-- ⚠ **제안 한계:** 노드/엣지·속성 *이름*은 제안이며 **v1 design-risk 스파이크로 검증 후 ADR 승격**. HugRAG의 "세 엣지 = 정적/생성형 1:1"은 검증서 기각(실제 2:1) — 아이디어만 차용하고 매핑은 직접 설계.
+- ✅ **실현 후기:** 정적층 노드/엣지·속성은 v1 온톨로지+회상 슬라이스에서 코드로 실현·검증됐다(ADR-20260701) — 이름은 이제 code=SoT. `edge_kind` 정적/생성형 분리는 v1이 정적 쪽만 실현했고, Neo4j Community 제약상 DB가 아니라 writer+테스트로 강제한다(향후 inferred writer가 규약으로 지켜야 함). HugRAG의 "세 엣지 = 정적/생성형 1:1"은 검증서 기각(실제 2:1) — 아이디어만 차용하고 매핑은 직접 설계했다.
 
 ## 3. 아키텍처
 
@@ -56,7 +58,7 @@
 | **Relate** ✅ | 엔티티들 | 코드·결정·의도·여정 간 관계 투영 | 질의 가능한 그래프 | 벡터 보완 |
 | **Recall** ✅ | 작업 맥락 질의 | 필요분만 점진 회상(🔶 pull 우선, push 확장) | 관련 조각(토큰 예산 내) | context rot 회피 |
 | **Curate** ✅ | 회상된 자료 | 조합형(계보·여정 구성) + 생성형(LLM 합성) | 답 + **출처+gap+confidence** | 세탁 금지 |
-| **Reconcile** ✅ | 브랜치 간 컨텍스트(개인↔팀) | 차이 인정 → 신선도·우선순위 판정 | 무엇이 더 신선/우선인지 | v1 design-risk가 그 씨앗 |
+| **Reconcile** ✅ | 브랜치 간 컨텍스트(개인↔팀) | 차이 인정 → 신선도·우선순위 판정 | 무엇이 더 신선/우선인지 | 설계위험 감지(slice 2)가 그 씨앗 |
 
 ⬜ 각 기능의 상세 동작·계약은 슬라이스별로 구체화.
 
@@ -68,11 +70,13 @@
 
 ## 6. 로드맵 / 슬라이스 계획
 
-- ✅ **v1 = design-risk slice** (`wi_2606263sn` intent): 최근/진행 브랜치 변경을 캡처→KG→GraphRAG 회상해 "팀원의 최근 push가 내 현재 설계에 위험인가"를 **근거 붙여 surface**. 성공 = **구조·동작 보장**, 퀄리티(정확도·헛경보)는 다음. pull 우선.
+- ✅ **v1 = 온톨로지 + grounded 회상 slice** (`wi_2606263sn`, **shipped·검증 통과**, ADR-20260701): 코드베이스(EcoleTree Java monolith)를 캡처→KG 온톨로지→GraphRAG로 관련 코드·의존을 **출처 붙여 점진 회상**. 성공 = **온톨로지 구축·동작 보장**(실코퍼스 158파일 e2e + 18 테스트 + 독립 verify), 회상 퀄리티는 다음. pull 우선. code=SoT: `src/palimpsest/`. *(재프레임 전 v1 후보였던 "설계위험 감지"는 slice 2로 유예.)*
 - 🔶 **이후 슬라이스(확장축)** — 각 슬라이스가 켜는 기능·온톨로지 조각:
 
   | 슬라이스 | 켜는 것 |
   |---|---|
+  | **생성형/semantic 요약** | GraphRAG community report·Meta 5질문식 tacit 요약(의미층 노드 + inferred 엣지) |
+  | **설계위험 감지**(slice 2) | 구조적 결합 회상 위에 '위험' 판정·표시(Reconcile 씨앗) |
   | 위험판정 **퀄리티** | Curate 정밀도, recall@k, 헛경보 억제 |
   | **push** 능동 경고 | Recall push 트리거·개입시점 |
   | **페르소나** 회상 | 소비자별 뷰(PM/아키텍트/…) |
@@ -84,18 +88,19 @@
 
 ## 7. 미결 · 검증 대상
 
-- ⬜ **DB substrate** — 🔶 Neo4j Community 1차 + Memgraph 폴백(문서 근거), Postgres+AGE 제외. **Neo4j 도입 방향 확정**(스파이크 권고와 일치), 단 성능·메모리·재구축 **실측 미결**(스키마+코퍼스 후 마이크로벤치)이라 ADR 승격은 실측 후. → `docs/spikes/db-substrate-spike.md` (`wi_2606264gw`).
-- ⬜ **node/edge 설계 미결(연구 §6)** — derived/inferred 엣지 생성 메커니즘(Datalog식 파생 vs Cypher+앱코드) · LLM 추론 엣지 precision 가드레일(거짓 인과 폭증 억제) · CPG intra-procedural data-flow를 cross-branch로 확장 · 코드-결박 신선도 갱신 단위·stale 판정 트리거. → `docs/research/precompute-hugrag-kg.md` (`§2-bis`).
-- ⬜ **스키마 상세** — §2 엔티티/관계/신선도 2축의 구체 정의.
-- ⬜ **임베딩 설계** — 부착 대상·차원·하이브리드 검색 구성.
-- ⬜ **데모 코퍼스** — 두 브랜치에 실제 설계 의존성 있는 repo(ditto / 최소 fixture / 타 프로젝트).
-- ⬜ **성능** — ingest·순회·벡터검색·재구축·메모리(스파이크 §4 지표).
+- ✅ **DB substrate (v1)** — Neo4j Community 채택·실현(`src/palimpsest/kg`, testcontainers 검증). 단 성능·메모리·재구축 **실측 벤치는 여전히 미결**(스파이크 §4 지표). → `docs/spikes/db-substrate-spike.md` (`wi_2606264gw`).
+- ◐ **node/edge 설계** — 정적/결정론층은 v1 실현(§2-bis ✅). 남은 미결: derived/inferred 엣지 생성 메커니즘(Datalog식 파생 vs Cypher+앱코드) · LLM 추론 엣지 precision 가드레일 · CPG intra-procedural → cross-branch 확장 · 코드-결박 신선도 갱신 단위·stale 판정 트리거. → `docs/research/precompute-hugrag-kg.md`.
+- ◐ **스키마 상세** — 정적 엔티티/관계는 v1 실현(code=SoT). 의미층 노드·신선도 2축(`valid_from/valid_to` 결정-계보)·`Risk` 노드 vs 관계는 미결.
+- ⬜ **임베딩 설계** — 부착 대상·차원·하이브리드 검색 구성(v1 미포함).
+- ✅ **데모 코퍼스 (v1)** — `EcoleTreeSystems`(Java monolith) 확정·사용. 두 브랜치 설계위험 시나리오는 slice 2에서.
+- ⬜ **성능** — ingest·순회·벡터검색·재구축·메모리(스파이크 §4 지표, 미측정).
 - ⬜ **노출 형태** — MCP/스킬/pluggable 택일.
 
 ## 8. ADR 인덱스 (권위)
 
 - ✅ `ADR-20260626-foundational-architecture` — KG 본체 + GraphRAG 회상층, 전 이력 보존, 자동 캡처. (active)
-- 🔶 **ADR 후보(결정 굳으면 승격):** DB substrate 택일(Neo4j — 실측 후) · 온톨로지/스키마(§2-bis node/edge·`edge_kind` 정적/생성형 분리 — v1 스파이크 후) · 신선도 2축 정의(`code_bound_at`/`valid_from·valid_to`) · 노출 형태.
+- ✅ `ADR-20260701-v1-ontology-recall-reframe` — v1 재프레임(설계위험→온톨로지+회상), VISION §다음단계#1 supersede + 실현된 정적 스키마·기술 결정(tree-sitter-java·Neo4j·`edge_kind` 구성강제·조합형 회상). (active)
+- 🔶 **ADR 후보(결정 굳으면 승격):** 신선도 2축 정의 중 결정-계보(`valid_from·valid_to`) · 의미층/inferred 엣지 생성·precision 가드레일 · 노출 형태(MCP/스킬). *(DB substrate·정적 스키마·`edge_kind` 정적분리는 ADR-20260701로 기록됨.)*
 
 ---
 

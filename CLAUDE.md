@@ -327,7 +327,7 @@ agent는 사용자 작업공간을 공유한다.
 agent는 모호함을 드러내고, 작게 바꾸고, 증거로만 완료를 말하고, 사용자의 의도를 조용히 줄이지 않는다. 별것 아닌 듯 보이지만, 이 업계에서는 그게 꽤 높은 기준이다.
 <!-- ditto:managed:end -->
 
-<!-- ditto:knowledge:start sha256=29c0db6aaa88f497c9b50b37ff3eb8cd5bb1cae18613896fbf452f6fcd42a6cb -->
+<!-- ditto:knowledge:start sha256=b89f9d2927e77eb003415d667ab0383036be1821a38d091bd5f37aca11ad66df -->
 # DITTO Knowledge (projected — do not edit by hand)
 
 Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summary.
@@ -347,5 +347,6 @@ Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summ
 
 ## Architecture decisions
 - ADR-20260626-foundational-architecture · active · ADR-20260626-foundational-architecture — palimpsest 정초 아키텍처: Knowledge Graph 본체 + GraphRAG 회상층
+- ADR-20260701-v1-ontology-recall-reframe · active · ADR-20260701-v1-ontology-recall-reframe — v1 첫 슬라이스 재프레임: 설계위험 감지 → 온톨로지 + grounded 회상
 
 <!-- ditto:knowledge:end -->

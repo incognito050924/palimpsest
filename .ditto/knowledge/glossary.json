@@ -23,9 +23,9 @@
     },
     {
       "term": "design-risk slice",
-      "definition": "v1 첫 수직 슬라이스 — 브랜치 간 설계위험 감지(팀원의 최근 push가 내 현재 설계에 위험인지 KG + GraphRAG로 근거 붙여 surface).",
+      "definition": "브랜치 간 설계위험 감지(팀원의 최근 push가 내 현재 설계에 위험인지 KG + GraphRAG로 근거 붙여 surface). 원래 v1 후보였으나 2026-07-01 재프레임(ADR-20260701)으로 slice 2로 유예 — v1은 '온톨로지 구축 + grounded 회상'이며, 설계위험 감지는 그 본체 위에 '위험 판정'을 얹는 후속 슬라이스다.",
       "status": "agreed",
-      "agreed_at": "2026-06-26T00:00:00.000Z"
+      "agreed_at": "2026-07-01T00:00:00.000Z"
     },
     {
       "term": "Code Property Graph (CPG)",
