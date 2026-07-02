@@ -29,12 +29,17 @@ PACKAGE = "Package"
 FILE = "File"
 CLASS = "Class"
 METHOD = "Method"
+# A Community groups Classes that form a connected component at the Class level
+# (via cross-class CALLS / DEPENDS_ON) — a deterministic, rebuild-stable partition.
+COMMUNITY = "Community"
 
 # Edge kinds (deterministic structural ontology)
 CONTAINS = "CONTAINS"
 IMPORTS = "IMPORTS"
 CALLS = "CALLS"
 DEPENDS_ON = "DEPENDS_ON"
+# A Class is a MEMBER_OF exactly one Community (exclusive, flat partition).
+MEMBER_OF = "MEMBER_OF"
 
 # Inferred semantic layer: externally-generated summaries (palimpsest is
 # provider-free — it never calls an LLM; a summary is produced elsewhere and

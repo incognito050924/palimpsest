@@ -7,6 +7,6 @@ result limit, and assembles the result by **combinatorial assembly only** — no
 LLM / generative call anywhere on this path (a hard ac-3 invariant).
 """
 
-from palimpsest.recall.graphrag import recall, expand
+from palimpsest.recall.graphrag import recall, recall_community, expand
 
-__all__ = ["recall", "expand"]
+__all__ = ["recall", "recall_community", "expand"]

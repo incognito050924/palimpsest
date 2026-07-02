@@ -45,13 +45,13 @@ from __future__ import annotations
 
 import json
 
-from palimpsest.ir import CALLS, DEPENDS_ON, CONTAINS, IMPORTS
+from palimpsest.ir import CALLS, DEPENDS_ON, CONTAINS, IMPORTS, MEMBER_OF
 
 # The relations recall may traverse (the deterministic structural ontology).
 DEFAULT_RELATIONS = (CALLS, DEPENDS_ON, CONTAINS, IMPORTS)
 
 # Ontology node labels, in the order we pick a node's primary kind.
-_NODE_LABELS = ("Repo", "Package", "File", "Class", "Method", "Episode")
+_NODE_LABELS = ("Repo", "Package", "File", "Class", "Method", "Episode", "Community")
 
 # A query id is label-free, but the uniqueness CONSTRAINT is per (label, id), so
 # two nodes CAN share an id under different labels. Order by label before LIMIT 1
@@ -360,6 +360,40 @@ def _neighbors_beyond(driver, frontier, visited, relations) -> bool:
         if rec["id"] not in visited:
             return True
     return False
+
+
+# Community members, as a SEPARATE entry point (never a traversable relation:
+# MEMBER_OF is deliberately absent from DEFAULT_RELATIONS, so a Community can never
+# leak into ordinary items traversal — mirrors the summaries channel's separation).
+# One row per member Class, grounded (commit + file:line), deterministic order.
+_COMMUNITY_MEMBERS = """
+MATCH (c:Class)-[:MEMBER_OF]->(:Community {id: $id})
+RETURN c.id AS id, labels(c) AS labels, c.name AS name,
+       c.qualified_name AS qualified_name,
+       c.path AS path, c.start_line AS start_line, c.end_line AS end_line,
+       c.source_commit AS source_commit, c.committed_at AS committed_at
+ORDER BY id
+LIMIT $lim
+"""
+
+
+def recall_community(driver, community_id, limit=25):
+    """Recall the member Classes of a Community, as a SEPARATE entry point.
+
+    ``community_id`` is a Community node id. Returns the same
+    ``{items, sources, summaries, gaps, confidence, expand_handle}`` shape — the
+    member Classes are the grounded ``items`` (commit + file:line via
+    :func:`_sources`, author-omitted), BOUNDED by ``limit``. This is
+    combinatorial only (a single MEMBER_OF query + dict building) — no LLM, and
+    it never walks MEMBER_OF as an ordinary traversal relation.
+    """
+    with driver.session() as session:
+        if session.run(_RESOLVE, id=community_id).single() is None:
+            gap = f"community '{community_id}' did not resolve to any node in the graph"
+            return _result([], [gap], None, [])
+        rows = [r.data() for r in session.run(_COMMUNITY_MEMBERS, id=community_id, lim=limit)]
+    items = [_item(rec, MEMBER_OF, 1) for rec in rows]
+    return _result(items, [], None, [])
 
 
 def expand(driver, handle, limit=25):

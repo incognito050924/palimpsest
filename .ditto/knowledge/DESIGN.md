@@ -5,7 +5,7 @@
 > **목적:** 슬라이스들이 흩어지지 않게 정렬하는 골격. 전체 목표·온톨로지·아키텍처·기능·로드맵·미결을 한 화면에 둔다.
 > **소비자:** palimpsest 개발자/에이전트. **갱신:** 결정·슬라이스·스파이크마다. **폐기 조건:** 계획이 전부 ADR·코드·계약으로 흡수되어 더 가리킬 게 없어지면.
 > **정체성·정초 전제:** [`../../docs/VISION.md`](../../docs/VISION.md)(이름·목적·5기능·잠긴 결정). 이 문서는 그 위에서 로드맵·형상을 조망한다.
-> work item: `wi_260626v8v`(v0 작성), `wi_26070129t`(계획 SoT 승격·최신화). 최종 갱신: 2026-07-01 (v1).
+> work item: `wi_260626v8v`(v0 작성), `wi_26070129t`(계획 SoT 승격·최신화), `wi_2607010n6`(Community 구조 그룹핑 반영). 최종 갱신: 2026-07-02.
 
 **범례:** ✅ 확정(ADR/코드/intent 근거) · 🔶 제안(미확정) · ⬜ 미결(검증/결정 대기)
 
@@ -21,7 +21,7 @@
 
 **원칙 (✅):** KG가 본체. **모든 엔티티가 1급**(단일 중심 단위 없음). **전 이력 보존** — 채택뿐 아니라 버려진 대안·중단된 접근·이전 결정까지(회귀 방지). **provenance(출처)와 신선도가 1급 속성**. (ADR-20260626)
 
-- 🔶 **엔티티 타입(제안, v1 최소 + 확장):** `Commit` · `File` · `Symbol`(Function/Class/Module) · `Change`(diff 단위) · `Branch` · `Author`(사람/에이전트) · `DesignDecision`(↔ADR) · `Requirement` · (확장) `Conversation`/`AgentTrace` · `Community`(GraphRAG 요약 노드).
+- 🔶 **엔티티 타입(제안, v1 최소 + 확장):** `Commit` · `File` · `Symbol`(Function/Class/Module) · `Change`(diff 단위) · `Branch` · `Author`(사람/에이전트) · `DesignDecision`(↔ADR) · `Requirement` · (확장) `Conversation`/`AgentTrace` · `Community`(구조 그룹핑 ✅ 실현·결정론) / `CommunityReport`(요약 prose 🔶 유예·생성형).
 - 🔶 **관계 타입(제안):** `MODIFIES` · `CALLS`/`DEPENDS_ON` · `IMPLEMENTS` · `DECIDES`/`SUPERSEDES` · `AUTHORED_BY` · `RISKS`/`CONFLICTS_WITH` · `EVOLVED_FROM`(이력 계보).
 - 🔶 **provenance:** 모든 노드·엣지에 `source`(commit SHA / 문서 / 대화) + `confidence` + `gap`(모르는 것). 생성형 추론은 반드시 이 셋으로 사실과 분리(세탁 금지).
 - 🔶 **신선도(2축, 제안):** ① **코드-결박 신선도** — 지식이 가리키는 코드 위치·심볼이 현재 커밋에 살아있나 · ② **결정-계보 신선도** — 이 지식이 더 최신 결정에 의해 supersede 됐나(이력은 보존하되 "현재 live" 판정). VISION의 "커밋 해시 기반 2축 신선도"를 이렇게 구체화 제안.
@@ -30,13 +30,14 @@
 ### 2-bis. node/edge 스키마 — 정적층 ✅ v1 실현 · 의미층 ◐ slice 4 부분 실현 *(2026-07-01, code=SoT)*
 
 > ✅ **정적/결정론 층(v1, ADR-20260701):** `Repo/Package/File/Class/Method`(+`Episode`=commit), `CONTAINS/CALLS/DEPENDS_ON/IMPORTS`, 모든 엣지 `edge_kind='deterministic'`(Neo4j Community라 DB제약이 아닌 **writer+테스트로 강제**), provenance(commit SHA/author)+`code_bound_at`. 회상은 조합형(LLM 없음). → `src/palimpsest/{ir,kg,recall}`.
+> ✅ **Community 구조 그룹핑(결정론 층, ADR-20260702-community-deterministic-structural):** Class 수준 무방향 연결 요소를 결정론적으로 분할한 `Community` 노드 + `(:Class)-[:MEMBER_OF]->(:Community)` 엣지(`edge_kind='deterministic'`, LLM·GDS 없음). 재구축 안정 `community:<sha256>` id, IR에 materialize돼 partition 불변식이 카운트, `recall_community` 전용 진입점(bounded·grounded·LLM-free, MEMBER_OF는 순회 화이트리스트 제외). **CommunityReport(요약 prose)는 생성형이라 유예(아래).** → `src/palimpsest/kg/community.py`, `recall_community` in `recall/graphrag.py`, `tests/kg/test_community.py`, `tests/recall/test_recall_community.py`.
 > ◐ **의미층 첫 적재 계약(slice 4, ADR-20260701-semantic-layer-load-contract):** `Summary` 노드(외부 생성 tacit 요약, id=`summary:<sha256>` 네임스페이스) + `SUMMARIZES` 엣지(`edge_kind='inferred'`, 첫 적재)가 실현됐다. **palimpsest는 provider-free(LLM 호출 0)** — 요약 생성은 전적으로 외부, 적재 시 근거결박·inferred 분리·provenance를 강제. 회상은 'summaries' 분리 채널로 노출(items 누출 없음). → `src/palimpsest/kg/summary.py`.
 > 🔶 **아직 미실현:** `DesignDecision/ADR` · `Risk/Finding` · `CommunityReport` 노드, 그 외 inferred 엣지(`CAUSALLY_RELATES`·`ADDRESSES_RISK`·`DECIDES`·`RELATES_TO`), 요약 durability(git-SoT), 내용(semantic) 검증. (→ §6 로드맵 '유예')
 
 1차 자료 종합 — Glean(pre-compute fact)·HugRAG(unified edge space)·CPG/Joern(type-label overlay)·Graphiti(bi-temporal/Episode). 근거·검증(23 confirmed/2 refuted)·출처 전체: [`research/precompute-hugrag-kg.md`](research/precompute-hugrag-kg.md). **충돌 검토: ADR-20260626과 충돌 없음** — 오히려 각 시스템이 우리 모델 조각을 실증.
 
-- 🔶 **노드 — 정적층(CPG):** `Repo` · `Module/File` · `Type/Class` · `Method/Function` · `Variable/Local` · `CallSite`. **의미층:** `Summary`(✅ slice 4)/`CommunityReport`(🔶) · `DesignDecision/ADR`(🔶) · `Risk/Finding`(🔶) · `Episode/SourceCommit`(✅).
-- 🔶 **엣지 — 결정론적 구조(`edge_kind=deterministic`, ✅ v1):** `CONTAINS` · `CALLS` · `IMPORTS` · `DEPENDS_ON` · (제안) `REACHING_DEF`(DATAFLOW) · `INHERITS` · `REF`. **생성형 추론(`edge_kind=inferred`):** `SUMMARIZES`(✅ slice 4) · `CAUSALLY_RELATES`(🔶) · `ADDRESSES_RISK`(🔶) · `DECIDES`(🔶) · `RELATES_TO`(🔶).
+- 🔶 **노드 — 정적층(CPG):** `Repo` · `Module/File` · `Type/Class` · `Method/Function` · `Variable/Local` · `CallSite` · `Community`(구조 그룹핑 ✅ 결정론). **의미층:** `Summary`(✅ slice 4)/`CommunityReport`(요약 prose 🔶 생성형) · `DesignDecision/ADR`(🔶) · `Risk/Finding`(🔶) · `Episode/SourceCommit`(✅).
+- 🔶 **엣지 — 결정론적 구조(`edge_kind=deterministic`, ✅ v1):** `CONTAINS` · `CALLS` · `IMPORTS` · `DEPENDS_ON` · `MEMBER_OF`(✅ Class→Community) · (제안) `REACHING_DEF`(DATAFLOW) · `INHERITS` · `REF`. **생성형 추론(`edge_kind=inferred`):** `SUMMARIZES`(✅ slice 4) · `CAUSALLY_RELATES`(🔶) · `ADDRESSES_RISK`(🔶) · `DECIDES`(🔶) · `RELATES_TO`(🔶).
 - ✅ **정적/생성형 분리(세탁 금지):** ① 별도 edge label + ② 모든 엣지에 `edge_kind = deterministic|inferred` 속성. `deterministic ⊎ inferred == total ∧ NULL==0`을 writer+테스트로 강제(Neo4j Community 제약 부재). slice 4에서 inferred 값 첫 적재.
 - 🔶 **provenance·2축 신선도 = 엣지/노드 속성(Graphiti 패턴):** `source`=Episode/commit SHA(provenance) · `valid_from`/`valid_to`=결정-계보 신선도(삭제 대신 invalidate=전이력 보존, 🔶 미실현) · `code_bound_at`=코드-결박 신선도(✅ slice 4에서 대상 커밋 committed_at에 결박) · inferred일 때 `generator`/`model`/`confidence`/`created_at`(✅ slice 4).
 
@@ -80,6 +81,7 @@
 
 - ✅ **요약 durability(git-SoT)** (`wi_260701ffv`, **shipped·검증 통과**, 커밋 `e51a1b2`): 외부 생성 요약 payload를 git-tracked `summaries/` 디렉토리에 SoT로 두고 CLI `load <dir>`로 일괄 재적재. 결정적 `summary:<sha256>` id + MERGE 멱등이라 Neo4j drop→reload가 동일 Summary·SUMMARIZES 복원(멱등 rebuild 테스트). provider-free 유지. git=SoT는 ADR-20260626 #2의 요약 적용(ADR-20260701 durability change-condition 충족).
 - ✅ **stale 감지(#4, detect-only)** (`wi_260701odo`/`wi_260701v0q`, **shipped·검증 통과**, 커밋 `7e11979`): 회상 summaries 채널의 각 항목에 `stale` bool 노출 — 대상 노드의 현재 `committed_at`이 요약 `code_bound_at`과 다르면(재ingest로 갱신됨) stale=true. 순수 read-side(새 Cypher 왕복 없음), provider-free. **자동 재생성(LLM 필요)은 경계 밖 유지.**
+- ✅ **Community 구조 그룹핑** (`wi_2607010n6`, **shipped·검증 통과**, ADR-20260702-community-deterministic-structural): Class 수준 연결 요소를 결정론적으로(union-find, LLM·GDS 없음) `Community` 노드 + `MEMBER_OF`(deterministic)로 분할, `community:<sha256>` 재구축 안정 id, IR materialize로 partition 불변식 포함, `recall_community` 전용 진입점(bounded·grounded·LLM-free). 검증: 55 passed. code=SoT: `src/palimpsest/kg/community.py`, `recall/graphrag.py`. **CommunityReport(생성형 요약 prose)는 유예(아래 #3).**
 - ✅ **recall correctness + 요약 실적재 경로** (`wi_2607016ir`, **shipped·검증 통과**, 커밋 `6197c80`): ① recall `_RESOLVE`에 `ORDER BY head(labels(n))` — label-free MATCH id 충돌 해소(#5) · ② `_NEIGHBORS`/`_SUMMARIES`에 `ORDER BY` 뒤 `LIMIT` — 순회 예산 server-side bound, 정상 노드 동등성 유지(#6) · ③ 외부 생성 요약을 실제로 적재하는 CLI `load` 진입점 신설(provider-free 유지). 검증: 전체 39 passed, 4 AC evidence-gated. code=SoT: `src/palimpsest/{recall/graphrag.py,cli.py,ir.py}`. *근거: 의미층 후속(아래 유예)의 실사용 전제(적재 경로)를 먼저 세운다.*
 
 - 🔶 **유예된 의미층 후속** — 실적재 경로로 실제 사용·고통을 확인하고 각 ADR change-condition을 재검토한 뒤 착수:
@@ -87,7 +89,7 @@
   | 유예 항목 | 무엇 · 왜 유예 |
   |---|---|
   | **#1 내용(semantic) 검증층** — ◐ 부분 shipped | **배선 실현**(wi_260701ulo, 커밋 `f1074ad`): 외부 판정자(ditto)가 만든 verdict를 `Summary.semantic_verdict`로 ingest·annotate(unfaithful도 로드, 회상 flag 노출), provider-free 유지. **후속(ditto 측)**: 판정 하네스·라벨 코퍼스·per-claim. 코퍼스는 Java 전용 추출기 제약(self-Python-repo 불가). |
-  | **#3 요약 대상 확장** | `Risk`/`DesignDecision`/`Community` 노드로 요약 대상 확대. 그 노드 타입이 아직 KG에 부재(생산자 없음) → 온톨로지 신설 선행. ADR 범위 밖. |
+  | **#3 요약 대상 확장** | `Risk`/`DesignDecision` 노드로 요약 대상 확대. 그 노드 타입이 아직 KG에 부재(생산자 없음) → 온톨로지 신설 선행. *(`Community` 구조 노드는 실현 — 위 roadmap 참조. 남은 것은 각 Community에 붙는 `CommunityReport` 생성형 요약 prose로, 외부 LLM 생산자 필요·범위 밖.)* |
 
   *(#2 durability·#4 stale detect는 shipped — 아래 로드맵 참조. #4의 자동 재생성은 provider-free 충돌로 경계 밖 유지.)*
 
@@ -109,7 +111,7 @@
 
 - ✅ **DB substrate (v1)** — Neo4j Community 채택·실현(`src/palimpsest/kg`, testcontainers 검증). 단 성능·메모리·재구축 **실측 벤치는 여전히 미결**(스파이크 §4 지표). → `docs/spikes/db-substrate-spike.md` (`wi_2606264gw`).
 - ◐ **node/edge 설계** — 정적/결정론층 v1 실현 + 의미층 첫 적재 slice 4 실현(§2-bis). 코드-결박 신선도 **stale 판정은 실현**(wi_260701v0q, 회상 stale flag). 남은 미결: derived/inferred 엣지 생성 메커니즘 · LLM 추론 엣지 precision 가드레일(내용 검증, 유예 #1) · CPG intra-procedural → cross-branch 확장 · stale **재조정=자동 재생성**(provider-free 충돌로 경계 밖). → `docs/research/precompute-hugrag-kg.md`.
-- ◐ **스키마 상세** — 정적 엔티티/관계 + Summary/SUMMARIZES는 실현(code=SoT). 의미층 나머지 노드(`Risk`/`DesignDecision`/`Community`, 유예 #3)·신선도 2축(`valid_from/valid_to` 결정-계보)·`Risk` 노드 vs 관계는 미결.
+- ◐ **스키마 상세** — 정적 엔티티/관계 + Summary/SUMMARIZES + `Community`/MEMBER_OF(결정론 구조 그룹핑, ADR-20260702)는 실현(code=SoT). 의미층 나머지 노드(`Risk`/`DesignDecision`, 유예 #3, 및 `CommunityReport` 생성형 요약 prose)·신선도 2축(`valid_from/valid_to` 결정-계보)·`Risk` 노드 vs 관계는 미결.
 - ✅ **요약 durability** — git-tracked `summaries/` SoT + CLI `load <dir>` 재구축으로 **해소**(wi_260701ffv, 커밋 `e51a1b2`): Neo4j drop→reload 멱등 복원. 다중 대상 코드베이스별 요약 분리·요약 payload 생산 파이프라인은 후속 여지.
 - ✅ **recall boundedness/정확성** — `_RESOLVE` label-free id 충돌·순회 예산 client-side를 **해소**(wi_2607016ir, 커밋 `6197c80`): 결정적 tie-break + server-side Cypher `LIMIT`. `_SUMMARIES` row-bound 정책(병리적 고요약 노드에서 distinct summary vs row 단위)은 후속 여지.
 - ⬜ **임베딩 설계** — 부착 대상·차원·하이브리드 검색 구성(v1 미포함).
@@ -123,7 +125,8 @@
 - ✅ `ADR-20260626-foundational-architecture` — KG 본체 + GraphRAG 회상층, 전 이력 보존, 자동 캡처, git=SoT. (active) → [`adr/ADR-20260626-foundational-architecture.md`](adr/ADR-20260626-foundational-architecture.md)
 - ✅ `ADR-20260701-v1-ontology-recall-reframe` — v1 재프레임(설계위험→온톨로지+회상), VISION §다음단계#1 supersede + 실현된 정적 스키마·기술 결정(tree-sitter-java·Neo4j·`edge_kind` 구성강제·조합형 회상). (active) → [`adr/ADR-20260701-v1-ontology-recall-reframe.md`](adr/ADR-20260701-v1-ontology-recall-reframe.md)
 - ✅ `ADR-20260701-semantic-layer-load-contract` — 의미층 적재 계약: provider-free(LLM 0), 외부 요약을 근거결박·`edge_kind='inferred'` 분리·provenance 강제로 적재, 회상 'summaries' 분리 채널. 내용검증·durability·대상확장·자동재생성은 유예/범위 밖(change-condition 명시). (active) → [`adr/ADR-20260701-semantic-layer-load-contract.md`](adr/ADR-20260701-semantic-layer-load-contract.md)
-- 🔶 **ADR 후보(결정 굳으면 승격):** 신선도 2축 중 결정-계보(`valid_from·valid_to`) · 내용(semantic) 검증 방식·precision 가드레일(유예 #1) · 요약 durability git-SoT 계약(유예 #2) · 의미층 대상 온톨로지(`Risk`/`DesignDecision`/`Community`, 유예 #3) · 노출 형태(MCP/스킬).
+- ✅ `ADR-20260702-community-deterministic-structural` — Community 멤버십 = 결정론적 구조 분할(Class 수준 연결 요소, `MEMBER_OF` deterministic, LLM·GDS 없음, `recall_community` 진입점). ADR-20260701-v1을 구체화(supersede 아님) — 유예된 것은 생성형 `CommunityReport` prose이고 그것은 계속 유예. (active) → [`adr/ADR-20260702-community-deterministic-structural.md`](adr/ADR-20260702-community-deterministic-structural.md)
+- 🔶 **ADR 후보(결정 굳으면 승격):** 신선도 2축 중 결정-계보(`valid_from·valid_to`) · 내용(semantic) 검증 방식·precision 가드레일(유예 #1) · 요약 durability git-SoT 계약(유예 #2) · 의미층 대상 온톨로지(`Risk`/`DesignDecision`, 유예 #3, 및 `CommunityReport` 생성형 요약) · 노출 형태(MCP/스킬).
 
 ---
 

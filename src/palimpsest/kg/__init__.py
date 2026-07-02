@@ -5,6 +5,11 @@ extraction ``IR`` idempotently (MERGE-on-id; git is SoT so the projection is
 rebuildable) with git provenance + freshness stamping.
 """
 
+from palimpsest.kg.community import (
+    augment_communities,
+    community_id,
+    compute_communities,
+)
 from palimpsest.kg.ingest import create_constraints, ingest
 from palimpsest.kg.summary import (
     Rejection,
@@ -20,4 +25,7 @@ __all__ = [
     "summary_id",
     "SummaryLoadResult",
     "Rejection",
+    "augment_communities",
+    "community_id",
+    "compute_communities",
 ]
