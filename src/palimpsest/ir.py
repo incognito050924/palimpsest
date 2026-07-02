@@ -64,6 +64,15 @@ DECIDES = "DECIDES"                   # edge type (DesignDecision -> code | Desi
 SUPERSEDES = "SUPERSEDES"            # edge type (DesignDecision -> DesignDecision)
 ADDRESSES_RISK = "ADDRESSES_RISK"    # edge type (DesignDecision -> Risk)
 
+# Inferred GENERIC relations between two EXISTING entities (no new node): an
+# external generator asserts a relation; palimpsest loads it grounded (both
+# endpoints resolve) with edge_kind='inferred'. rel_type is restricted to this
+# closed set — never free-form data in the query.
+CAUSALLY_RELATES = "CAUSALLY_RELATES"   # directed: cause -> effect
+RELATES_TO = "RELATES_TO"               # association
+CONFLICTS_WITH = "CONFLICTS_WITH"       # conflict (숨은 의도 충돌 표시)
+INFERRED_RELATION_TYPES = frozenset({CAUSALLY_RELATES, RELATES_TO, CONFLICTS_WITH})
+
 # ``edge_kind`` marker — the schema-enforced no-laundering separation between the
 # deterministic structural layer and the inferred semantic layer. Both values are
 # colocated here so the two edge_kind constants live in one place.
@@ -300,6 +309,61 @@ class Risk:
         return cls(
             title=data["title"],
             flags=tuple(data.get("flags", ())),
+            generator=data["generator"],
+            model=data["model"],
+            source_commit=data["source_commit"],
+            created_at=data["created_at"],
+            confidence=data.get("confidence"),
+            semantic_verdict=data.get("semantic_verdict"),
+        )
+
+
+@dataclass(frozen=True)
+class InferredRelation:
+    """An externally-generated inferred relation between two EXISTING entities.
+
+    palimpsest never calls an LLM: the assertion ("A relates to / causally relates
+    to / conflicts with B") is produced elsewhere and handed in for grounded,
+    idempotent load. ``source_id``/``target_id`` are ids of existing graph nodes —
+    BOTH must resolve, else the loader rejects the relation (entity-atomic) rather
+    than launder a dangling edge in. ``rel_type`` must be one of
+    :data:`INFERRED_RELATION_TYPES`. No new node is created; this is a pure edge.
+
+    Like :class:`Risk`, ``code_bound_at`` is NOT a field — the loader binds it to
+    the source endpoint's ``committed_at`` so freshness follows the code. The
+    assertion's origin is attributed via ``generator``/``model``; ``created_at`` is
+    the external generation time.
+    """
+
+    source_id: str
+    target_id: str
+    rel_type: str
+    generator: str
+    model: str
+    source_commit: str
+    created_at: str
+    confidence: Optional[float] = None
+    semantic_verdict: Optional[dict] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "source_id": self.source_id,
+            "target_id": self.target_id,
+            "rel_type": self.rel_type,
+            "generator": self.generator,
+            "model": self.model,
+            "source_commit": self.source_commit,
+            "created_at": self.created_at,
+            "confidence": self.confidence,
+            "semantic_verdict": self.semantic_verdict,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "InferredRelation":
+        return cls(
+            source_id=data["source_id"],
+            target_id=data["target_id"],
+            rel_type=data["rel_type"],
             generator=data["generator"],
             model=data["model"],
             source_commit=data["source_commit"],

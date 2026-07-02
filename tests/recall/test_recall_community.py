@@ -19,7 +19,7 @@ CTRL = "kr.co.ecoletree.service.commute.controller.CommuteController"
 SVC = "kr.co.ecoletree.service.commute.service.CommuteService"
 AUTHOR = "jeongjin <jeongjin@ecoletree.com>"
 
-RESULT_KEYS = {"items", "sources", "summaries", "risks", "decisions", "gaps", "confidence", "expand_handle"}
+RESULT_KEYS = {"items", "sources", "summaries", "risks", "decisions", "relations", "gaps", "confidence", "expand_handle"}
 
 
 @pytest.fixture

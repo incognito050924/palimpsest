@@ -17,13 +17,21 @@ import copy
 
 import pytest
 
-from palimpsest.ir import REPO, DesignDecision, Risk
+from palimpsest.ir import (
+    CAUSALLY_RELATES,
+    CONFLICTS_WITH,
+    REPO,
+    DesignDecision,
+    InferredRelation,
+    Risk,
+)
 from palimpsest.kg import (
     augment_communities,
     community_id,
     decision_id,
     ingest,
     load_design_decisions,
+    load_relations,
     load_risks,
     risk_id,
 )
@@ -35,7 +43,7 @@ SVC = "kr.co.ecoletree.service.commute.service.CommuteService"
 CTRL_METHOD = CTRL + "#selectAttedanceCondition(Map,HttpServletRequest)"
 
 RESULT_KEYS = {
-    "items", "sources", "summaries", "risks", "decisions",
+    "items", "sources", "summaries", "risks", "decisions", "relations",
     "gaps", "confidence", "expand_handle",
 }
 
@@ -127,6 +135,76 @@ def test_decisions_channel_marks_superseded_not_live(recall_db):
     entry = next(d for d in out["decisions"] if d["id"] == d0_id)
     assert entry["valid_to"] == "2026-07-03T00:00:00+09:00"  # invalidated at superseder's time
     assert entry["live"] is False                            # not live, yet still surfaced
+
+
+def test_relations_channel_surfaces_inferred_relation(recall_db):
+    """ac-3: an inferred relation touching a recalled node surfaces in the
+    'relations' channel and never enters the items channel."""
+    rel = InferredRelation(
+        source_id=CTRL_METHOD, target_id=SVC, rel_type=CONFLICTS_WITH,
+        generator="fixture-rel-gen", model="m1", source_commit=COMMIT,
+        created_at="2026-07-02T09:00:00+09:00",
+    )
+    assert load_relations(recall_db, [rel]).loaded == 1
+
+    out = recall(recall_db, CTRL_METHOD, depth=1)
+    entry = next(
+        (r for r in out["relations"]
+         if r["source_id"] == CTRL_METHOD and r["target_id"] == SVC),
+        None,
+    )
+    assert entry is not None                     # surfaced in the relations channel
+    assert entry["rel_type"] == CONFLICTS_WITH
+    assert entry["edge_kind"] == "inferred"
+    # never traversed into items via the inferred relation
+    assert all(it["relation"] != CONFLICTS_WITH for it in out["items"])
+
+
+def test_relations_channel_round_trips_provenance(recall_db):
+    """The relations channel carries the edge provenance through load->recall:
+    confidence + external semantic_verdict (parsed back from stored JSON) + commit.
+    Uses a distinct (endpoint, rel_type) so it never collides with other tests'
+    edges on the shared session graph."""
+    verdict = {"verdict": "confirmed", "judge": "ditto"}
+    rel = InferredRelation(
+        source_id=CTRL_METHOD, target_id=CTRL, rel_type=CAUSALLY_RELATES,
+        generator="g", model="m", source_commit=COMMIT,
+        created_at="2026-07-02T09:00:00+09:00",
+        confidence=0.7, semantic_verdict=verdict,
+    )
+    assert load_relations(recall_db, [rel]).loaded == 1
+
+    out = recall(recall_db, CTRL_METHOD, depth=1)
+    entry = next(
+        r for r in out["relations"]
+        if r["source_id"] == CTRL_METHOD and r["target_id"] == CTRL
+        and r["rel_type"] == CAUSALLY_RELATES
+    )
+    assert entry["confidence"] == 0.7
+    assert entry["semantic_verdict"] == verdict      # parsed back from stored JSON
+    assert entry["source_commit"] == COMMIT
+    assert entry["created_at"] == "2026-07-02T09:00:00+09:00"
+
+
+def test_relations_channel_via_recall_community(recall_db, ir):
+    """ac-3: recall_community also surfaces inferred relations on its members."""
+    aug = copy.deepcopy(ir)
+    prov = next(n for n in aug.nodes if n.kind == REPO).provenance
+    augment_communities(aug, prov)
+    ingest(recall_db, aug)
+    cid = community_id([CTRL, SVC])
+    rel = InferredRelation(
+        source_id=CTRL, target_id=SVC, rel_type=CONFLICTS_WITH,
+        generator="fixture-rel-gen", model="m1", source_commit=COMMIT,
+        created_at="2026-07-02T09:00:00+09:00",
+    )
+    assert load_relations(recall_db, [rel]).loaded == 1
+
+    out = recall_community(recall_db, cid)
+    assert any(
+        r["source_id"] == CTRL and r["target_id"] == SVC and r["rel_type"] == CONFLICTS_WITH
+        for r in out["relations"]
+    )
 
 
 def test_recall_community_surfaces_member_risk_and_decision(recall_db, ir):

@@ -45,7 +45,14 @@ from __future__ import annotations
 
 import json
 
-from palimpsest.ir import CALLS, DEPENDS_ON, CONTAINS, IMPORTS, MEMBER_OF
+from palimpsest.ir import (
+    CALLS,
+    DEPENDS_ON,
+    CONTAINS,
+    IMPORTS,
+    MEMBER_OF,
+    INFERRED_RELATION_TYPES,
+)
 
 # The relations recall may traverse (the deterministic structural ontology).
 DEFAULT_RELATIONS = (CALLS, DEPENDS_ON, CONTAINS, IMPORTS)
@@ -357,6 +364,64 @@ def _decisions(driver, items, limit) -> list:
     return _entity_channel(rows)
 
 
+# The inferred-RELATION channel — plain inferred EDGES (CAUSALLY_RELATES /
+# RELATES_TO / CONFLICTS_WITH) touching the recalled nodes. One entry per edge
+# (``WITH DISTINCT e`` dedupes when both endpoints are recalled). These rel types
+# are deliberately absent from DEFAULT_RELATIONS, so they never enter items
+# traversal; they surface solely here. ``$rel_types`` is the closed inferred set.
+_RELATIONS_CHANNEL = """
+UNWIND $ids AS anchor_id
+MATCH (a {id: anchor_id})-[e]-()
+WHERE type(e) IN $rel_types
+WITH DISTINCT e
+RETURN type(e) AS rel_type,
+       startNode(e).id AS source_id, endNode(e).id AS target_id,
+       e.edge_kind AS edge_kind, e.source_commit AS source_commit,
+       e.created_at AS created_at, e.code_bound_at AS code_bound_at,
+       e.confidence AS confidence, e.semantic_verdict AS semantic_verdict
+ORDER BY rel_type, source_id, target_id
+LIMIT $lim
+"""
+
+
+def _relation_entry(row) -> dict:
+    return {
+        "rel_type": row["rel_type"],
+        "source_id": row["source_id"],
+        "target_id": row["target_id"],
+        "edge_kind": row["edge_kind"],           # inferred marker, from the edge
+        "code_bound_at": row["code_bound_at"],
+        "confidence": row["confidence"],
+        # External judge's verdict (annotate-only), parsed from stored JSON; absent
+        # -> None. palimpsest never judges — it only surfaces what was ingested.
+        "semantic_verdict": (
+            json.loads(row["semantic_verdict"]) if row.get("semantic_verdict") else None
+        ),
+        "source_commit": row["source_commit"],
+        "created_at": row["created_at"],
+    }
+
+
+def _relations(driver, items, limit) -> list:
+    """The inferred-relation channel for the recalled ``items`` (already bounded).
+
+    ``limit`` is a server-side row bound (Cypher ``LIMIT`` after ORDER BY)."""
+    if not items:
+        return []
+    ids = [it["id"] for it in items]
+    with driver.session() as session:
+        rows = [
+            r.data()
+            for r in session.run(
+                _RELATIONS_CHANNEL,
+                ids=ids,
+                rel_types=list(INFERRED_RELATION_TYPES),
+                lim=limit,
+            )
+        ]
+    return [_relation_entry(row) for row in rows]
+
+
 def _seed_relation_gaps(driver, query, relations):
     """For explicitly requested relations only: any that have no edge on the
     seed is an honest gap (a confident empty answer would be dishonest)."""
@@ -395,7 +460,7 @@ def _hop(driver, frontier, visited, relations, depth, budget):
     return items, emitted, truncated
 
 
-def _result(items, gaps, handle, summaries, risks=None, decisions=None):
+def _result(items, gaps, handle, summaries, risks=None, decisions=None, relations=None):
     return {
         "items": items,
         # Separate grounding channel (id-keyed), mirrors items — never merged.
@@ -407,6 +472,9 @@ def _result(items, gaps, handle, summaries, risks=None, decisions=None):
         # items. Empty for entry points that do not run the detection flow.
         "risks": risks or [],
         "decisions": decisions or [],
+        # Separate inferred-relation channel — CAUSALLY_RELATES / RELATES_TO /
+        # CONFLICTS_WITH edges touching the recalled nodes, never merged into items.
+        "relations": relations or [],
         "gaps": gaps,
         "confidence": _confidence(items),
         "expand_handle": handle,
@@ -481,6 +549,7 @@ def recall(driver, query, depth=1, limit=25, relations=None):
         _summaries(driver, items, limit),
         _risks(driver, items, limit),
         _decisions(driver, items, limit),
+        _relations(driver, items, limit),
     )
 
 
@@ -536,6 +605,7 @@ def recall_community(driver, community_id, limit=25):
         _summaries(driver, items, limit),
         _risks(driver, items, limit),
         _decisions(driver, items, limit),
+        _relations(driver, items, limit),
     )
 
 
@@ -651,4 +721,5 @@ def expand(driver, handle, limit=25):
         _summaries(driver, new_items, limit),
         _risks(driver, new_items, limit),
         _decisions(driver, new_items, limit),
+        _relations(driver, new_items, limit),
     )
