@@ -63,7 +63,7 @@
 | **Relate** ✅ | 엔티티들 | 코드·결정·의도·여정 간 관계 투영 | 질의 가능한 그래프 | 벡터 보완 |
 | **Recall** ✅ | 작업 맥락 질의 | 필요분만 점진 회상(🔶 pull 우선, push 확장) | 관련 조각(토큰 예산 내) | context rot 회피 |
 | **Curate** ◐ | 회상된 자료 | 조합형(계보·여정 구성, ✅) + 생성형(외부 LLM 합성, 적재만 ✅ slice 4) | 답 + **출처+gap+confidence** | 세탁 금지, provider-free |
-| **Reconcile** ⬜ | 브랜치 간 컨텍스트(개인↔팀) | 차이 인정 → 신선도·우선순위 판정 | 무엇이 더 신선/우선인지 | 설계위험 감지(slice 2)가 그 씨앗 |
+| **Reconcile** ⬜ | 브랜치 간 컨텍스트(개인↔팀) | 차이 인정 → 신선도·우선순위 판정 | 무엇이 더 신선/우선인지 | 설계위험 감지(slice 2, wi_260702qe3 ✅)가 그 씨앗 |
 
 ⬜ 각 기능의 상세 동작·계약은 슬라이스별로 구체화.
 
@@ -76,7 +76,7 @@
 
 ## 6. 로드맵 / 슬라이스 계획
 
-- ✅ **v1 = 온톨로지 + grounded 회상 slice** (`wi_2606263sn`, **shipped·검증 통과**, ADR-20260701-v1-ontology-recall-reframe): 코드베이스(EcoleTree Java monolith)를 캡처→KG 온톨로지→GraphRAG로 관련 코드·의존을 **출처 붙여 점진 회상**. 성공 = **온톨로지 구축·동작 보장**(실코퍼스 158파일 e2e + 테스트 + 독립 verify), 회상 퀄리티는 다음. code=SoT: `src/palimpsest/`. *(재프레임 전 v1 후보였던 "설계위험 감지"는 slice 2로 유예.)*
+- ✅ **v1 = 온톨로지 + grounded 회상 slice** (`wi_2606263sn`, **shipped·검증 통과**, ADR-20260701-v1-ontology-recall-reframe): 코드베이스(EcoleTree Java monolith)를 캡처→KG 온톨로지→GraphRAG로 관련 코드·의존을 **출처 붙여 점진 회상**. 성공 = **온톨로지 구축·동작 보장**(실코퍼스 158파일 e2e + 테스트 + 독립 verify), 회상 퀄리티는 다음. code=SoT: `src/palimpsest/`. *(재프레임 전 v1 후보였던 "설계위험 감지"는 slice 2로 유예 → wi_260702qe3에서 shipped, 아래 로드맵.)*
 - ✅ **slice 4 = 의미층 첫 적재 계약** (`wi_260701cjf`, **shipped·검증 통과**, ADR-20260701-semantic-layer-load-contract): 외부 생성 tacit 요약을 `Summary` 노드 + `SUMMARIZES`(inferred)로 **근거결박·inferred 분리·provenance 강제**로 적재. provider-free. 회상은 'summaries' 분리 채널. code=SoT: `src/palimpsest/kg/summary.py`.
 
 - ✅ **요약 durability(git-SoT)** (`wi_260701ffv`, **shipped·검증 통과**, 커밋 `e51a1b2`): 외부 생성 요약 payload를 git-tracked `summaries/` 디렉토리에 SoT로 두고 CLI `load <dir>`로 일괄 재적재. 결정적 `summary:<sha256>` id + MERGE 멱등이라 Neo4j drop→reload가 동일 Summary·SUMMARIZES 복원(멱등 rebuild 테스트). provider-free 유지. git=SoT는 ADR-20260626 #2의 요약 적용(ADR-20260701 durability change-condition 충족).
@@ -90,7 +90,9 @@
 
 - ✅ **DesignDecision inferred 엔티티 로더** (`wi_260702b48`, **shipped·검증 통과**, ADR-20260702-risk-designdecision-load-contract active[계약 완전 실현]): 외부 생성 `DesignDecision`을 새 노드 + `DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK`(inferred) 엣지로 적재 — namespace id `decision:<sha256>`, ≥1 `DECIDES`로 grounded, 엔티티-간 엣지 라벨체크(SUPERSEDES→DesignDecision·ADDRESSES_RISK→Risk), 미해소/wrong-label entity-atomic 거부, 전용 로더 `kg/decision.py`. 세 엣지 모두 REL_TYPES·DEFAULT_RELATIONS 제외. 검증: 88 passed, provider-free. *(same-batch 엔티티 resolution은 유예; inferred 회상 전용 채널 `recall_decision`은 아래 별도 항목에 실현.)*
 
-- ✅ **inferred 회상 전용 채널(forward)** (`wi_260702tad`, **shipped·검증 통과**, ADR-20260702-risk-designdecision-load-contract item 7 실현): 적재된 Risk/DesignDecision를 회상하는 전용 진입점 `recall_risk(risk_id)`·`recall_decision(decision_id)` 추가(`recall_community` 미러) — 엔티티 id로 그 엔티티가 가리키는 grounded 대상(RISKS flag 코드 / DECIDES·SUPERSEDES·ADDRESSES_RISK 대상, 각 엣지타입을 relation으로)을 bounded·gap·표준 `_result` 6키 형식으로 반환. 라벨-scoped 존재확인(`:Risk`/`:DesignDecision`), deterministic ORDER BY+LIMIT, combinatorial-only(provider-free, LLM 0). 방향=**forward**(`recall_community` 선례); **역방향(코드→위험/결정)·main recall 결과 채널 통합('risks'/'decisions'/'inferred')은 그 소비자=설계위험 감지 slice 2로 유예**. 검증: 94 passed + fresh-context 독립 리뷰 PASS(findings 0). code=SoT: `src/palimpsest/recall/graphrag.py`, `tests/recall/test_recall_risk.py`·`tests/recall/test_recall_decision.py`.
+- ✅ **inferred 회상 전용 채널(forward)** (`wi_260702tad`, **shipped·검증 통과**, ADR-20260702-risk-designdecision-load-contract item 7 실현): 적재된 Risk/DesignDecision를 회상하는 전용 진입점 `recall_risk(risk_id)`·`recall_decision(decision_id)` 추가(`recall_community` 미러) — 엔티티 id로 그 엔티티가 가리키는 grounded 대상(RISKS flag 코드 / DECIDES·SUPERSEDES·ADDRESSES_RISK 대상, 각 엣지타입을 relation으로)을 bounded·gap·표준 `_result` 6키 형식으로 반환. 라벨-scoped 존재확인(`:Risk`/`:DesignDecision`), deterministic ORDER BY+LIMIT, combinatorial-only(provider-free, LLM 0). 방향=**forward**(`recall_community` 선례); **역방향(코드→위험/결정)·main recall 결과 채널 통합은 slice 2(wi_260702qe3)에서 실현** — 아래 별도 항목. 검증: 94 passed + fresh-context 독립 리뷰 PASS(findings 0). code=SoT: `src/palimpsest/recall/graphrag.py`, `tests/recall/test_recall_risk.py`·`tests/recall/test_recall_decision.py`.
+
+- ✅ **설계위험 감지 (slice 2)** (`wi_260702qe3`, **shipped·검증 통과**, ADR-20260702-risk-designdecision-load-contract item 7/8 실현): 구조적 결합 회상(`recall`/`recall_community`/`expand`) 결과에, 회상된 코드에 결박된 Risk·DesignDecision를 **분리 채널 `risks`/`decisions`로 표시**(역방향 조회: 코드 id→그것을 RISKS-flag/DECIDES하는 엔티티, `summaries` 채널 미러 — 근거 refs·edge_kind·code_bound_at·stale, items 누출 없음). 판정은 외부(provider-free), palimpsest는 구조적 표시만 = **Reconcile 씨앗**. wi_260702tad에서 유예했던 역방향+채널 통합을 여기서 완결(유예 없음). 검증: 98 passed + fresh-context 독립 리뷰 PASS(behavior-risk finding 0). code=SoT: `src/palimpsest/recall/graphrag.py`, `tests/recall/test_recall_design_risk.py`. *(recall_community의 CommunityReport('summaries') 표면화는 별도 ADR-20260702-communityreport-load-contract 소관으로 유예.)*
 
 - 🔶 **유예된 의미층 후속** — 실적재 경로로 실제 사용·고통을 확인하고 각 ADR change-condition을 재검토한 뒤 착수:
 
@@ -105,7 +107,7 @@
 
   | 슬라이스 | 켜는 것 |
   |---|---|
-  | **설계위험 감지**(slice 2) | 구조적 결합 회상 위에 '위험' 판정·표시(Reconcile 씨앗) |
+  | **설계위험 감지**(slice 2) ✅ | 구조적 결합 회상 위 위험/결정 표시 = `risks`/`decisions` 채널(wi_260702qe3 실현, 위 로드맵) |
   | 위험판정 **퀄리티** | Curate 정밀도, recall@k, 헛경보 억제 |
   | **push** 능동 경고 | Recall push 트리거·개입시점 |
   | **페르소나** 회상 | 소비자별 뷰(PM/아키텍트/…) |
@@ -135,7 +137,7 @@
 - ✅ `ADR-20260701-semantic-layer-load-contract` — 의미층 적재 계약: provider-free(LLM 0), 외부 요약을 근거결박·`edge_kind='inferred'` 분리·provenance 강제로 적재, 회상 'summaries' 분리 채널. 내용검증·durability·대상확장·자동재생성은 유예/범위 밖(change-condition 명시). (active) → [`adr/ADR-20260701-semantic-layer-load-contract.md`](adr/ADR-20260701-semantic-layer-load-contract.md)
 - ✅ `ADR-20260702-community-deterministic-structural` — Community 멤버십 = 결정론적 구조 분할(Class 수준 연결 요소, `MEMBER_OF` deterministic, LLM·GDS 없음, `recall_community` 진입점). ADR-20260701-v1을 구체화(supersede 아님) — 유예된 것은 생성형 `CommunityReport` prose이고 그것은 계속 유예. (active) → [`adr/ADR-20260702-community-deterministic-structural.md`](adr/ADR-20260702-community-deterministic-structural.md)
 - ✅ `ADR-20260702-communityreport-load-contract` — CommunityReport 적재 계약 **실현**(active, wi_260702smx): `ADR-20260701` 적재 계약을 target=`Community`로 정련(Summary wire·`SUMMARIZES`·'summaries' 채널 재사용, grounding=멤버 Class로 강화, `code_bound_at`=Community `committed_at`). 로더(`_in_community` 멤버십-grounding)·fixture 검증 완료(59 passed). `ADR-20260702-community-deterministic-structural` line36 이행. 실데이터 생성은 provider-free상 외부; orphan 처리·`recall_community` 통합은 유예(change_condition). → [`adr/ADR-20260702-communityreport-load-contract.md`](adr/ADR-20260702-communityreport-load-contract.md)
-- ✅ `ADR-20260702-risk-designdecision-load-contract` — Risk·DesignDecision 적재 계약: `ADR-20260701`을 1급 inferred 엔티티로 일반화(namespace `risk:`/`decision:` id, inferred 엣지, grounded 노드 강제, 전용 로더). **양쪽 완전 실현**(active): `Risk`+`RISKS`(wi_2607021h0, `kg/risk.py`) · `DesignDecision`+`DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK`(wi_260702b48, `kg/decision.py`, 라벨체크), 88 passed. 회상 전용 진입점(forward) `recall_risk`/`recall_decision` 실현(wi_260702tad, 94 passed). same-batch resolution·회상 역방향/채널 통합은 유예. → [`adr/ADR-20260702-risk-designdecision-load-contract.md`](adr/ADR-20260702-risk-designdecision-load-contract.md)
+- ✅ `ADR-20260702-risk-designdecision-load-contract` — Risk·DesignDecision 적재 계약: `ADR-20260701`을 1급 inferred 엔티티로 일반화(namespace `risk:`/`decision:` id, inferred 엣지, grounded 노드 강제, 전용 로더). **양쪽 완전 실현**(active): `Risk`+`RISKS`(wi_2607021h0, `kg/risk.py`) · `DesignDecision`+`DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK`(wi_260702b48, `kg/decision.py`, 라벨체크), 88 passed. 회상 진입점(forward, wi_260702tad) + 역방향 `risks`/`decisions` 채널(wi_260702qe3, 설계위험 감지 slice 2, 98 passed) 실현. same-batch resolution은 유예. → [`adr/ADR-20260702-risk-designdecision-load-contract.md`](adr/ADR-20260702-risk-designdecision-load-contract.md)
 - 🔶 **ADR 후보(결정 굳으면 승격):** 신선도 2축 중 결정-계보(`valid_from·valid_to`) · 내용(semantic) 검증 방식·precision 가드레일(유예 #1) · 요약 durability git-SoT 계약(유예 #2) · 노출 형태(MCP/스킬).
 
 ---
