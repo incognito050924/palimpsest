@@ -33,14 +33,18 @@ from palimpsest.ir import (
     DEPENDS_ON,
     MEMBER_OF,
     SUMMARY,
+    RISK,
     EDGE_KIND_DETERMINISTIC,
 )
 
-# The ontology, closed and explicit (no dynamic labels from data). ``Summary`` is
-# the inferred-layer label; it carries no deterministic IR node, but is listed
-# here so ``create_constraints`` provisions its uniqueness CONSTRAINT. ``Community``
-# is a deterministic node materialized in the IR by ``augment_communities``.
-NODE_LABELS = [REPO, PACKAGE, FILE, CLASS, METHOD, "Episode", SUMMARY, COMMUNITY]
+# The ontology, closed and explicit (no dynamic labels from data). ``Summary`` and
+# ``Risk`` are inferred-layer labels; they carry no deterministic IR node, but are
+# listed here so ``create_constraints`` provisions their uniqueness CONSTRAINT.
+# ``Community`` is a deterministic node materialized in the IR by
+# ``augment_communities``. Their inferred edges (SUMMARIZES / RISKS) are
+# deliberately ABSENT from ``REL_TYPES`` — the generic writer must never stamp them
+# ``edge_kind='deterministic'``; their dedicated loaders write them as inferred.
+NODE_LABELS = [REPO, PACKAGE, FILE, CLASS, METHOD, "Episode", SUMMARY, COMMUNITY, RISK]
 REL_TYPES = [CONTAINS, IMPORTS, CALLS, DEPENDS_ON, MEMBER_OF]
 
 # A MERGE-on-id per label; property SET is uniform (unused props resolve to

@@ -47,6 +47,13 @@ MEMBER_OF = "MEMBER_OF"
 SUMMARY = "Summary"          # node label
 SUMMARIZES = "SUMMARIZES"    # edge type
 
+# Inferred semantic layer (first-class judgment entity): an externally-generated
+# Risk — a "this code is risky" judgment with its own identity. A Risk node RISKS
+# the code node(s) it flags. Like Summary, produced elsewhere and handed in for
+# grounded load; palimpsest never judges.
+RISK = "Risk"                # node label
+RISKS = "RISKS"              # edge type
+
 # ``edge_kind`` marker — the schema-enforced no-laundering separation between the
 # deterministic structural layer and the inferred semantic layer. Both values are
 # colocated here so the two edge_kind constants live in one place.
@@ -232,6 +239,61 @@ class Summary:
             source_commit=data["source_commit"],
             created_at=data["created_at"],
             prompt=data.get("prompt"),
+            confidence=data.get("confidence"),
+            semantic_verdict=data.get("semantic_verdict"),
+        )
+
+
+@dataclass(frozen=True)
+class Risk:
+    """An externally-generated risk judgment over one or more code entities.
+
+    palimpsest never calls an LLM: the judgment ("this code is risky") is produced
+    elsewhere and handed in for grounded, idempotent load. ``flags`` are the code
+    node ids this risk flags (the ``RISKS`` targets); each must resolve to a real
+    graph node, and a Risk must flag >=1 — a risk with no resolvable flag is a
+    floating judgment, and the loader rejects it rather than launder it in.
+
+    Like :class:`Summary`, ``code_bound_at`` is deliberately NOT a field: freshness
+    must follow the code, so the loader binds it to a flagged node's
+    ``committed_at``. ``author`` is likewise absent — authorship lives on the
+    grounded deterministic code nodes; the judgment's origin is attributed via
+    ``generator``/``model``. ``created_at`` is the external generation time.
+    """
+
+    title: str
+    flags: tuple[str, ...]
+    generator: str
+    model: str
+    source_commit: str
+    created_at: str
+    confidence: Optional[float] = None
+    # An EXTERNAL judge's semantic verdict, NOT the generator's self-report — kept
+    # on its own field, never overloading ``confidence`` (mirrors Summary). Absent
+    # -> None (unverified). palimpsest never produces this; it only ingests it.
+    semantic_verdict: Optional[dict] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "title": self.title,
+            "flags": list(self.flags),
+            "generator": self.generator,
+            "model": self.model,
+            "source_commit": self.source_commit,
+            "created_at": self.created_at,
+            "confidence": self.confidence,
+            "semantic_verdict": self.semantic_verdict,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Risk":
+        return cls(
+            title=data["title"],
+            flags=tuple(data.get("flags", ())),
+            generator=data["generator"],
+            model=data["model"],
+            source_commit=data["source_commit"],
+            created_at=data["created_at"],
             confidence=data.get("confidence"),
             semantic_verdict=data.get("semantic_verdict"),
         )

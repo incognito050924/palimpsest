@@ -1,13 +1,13 @@
-# ADR-20260702-risk-designdecision-load-contract — Risk·DesignDecision 적재 계약: ADR-20260701을 1급 inferred 시맨틱 엔티티(노드+엣지)로 일반화(로더 유예)
+# ADR-20260702-risk-designdecision-load-contract — Risk·DesignDecision 적재 계약: ADR-20260701을 1급 inferred 시맨틱 엔티티(노드+엣지)로 일반화(Risk 로더 실현 · DesignDecision 유예)
 
 - 식별자: `ADR-20260702-risk-designdecision-load-contract` (파일명 = 불변 식별자)
-- 상태: proposed (계약 초안 — 로더·노드·엣지 미구현. 외부 생산자 확정 시 active로 승격, 아래 change_condition)
+- 상태: active (Risk 로더 실현: wi_2607021h0 — Risk 노드+RISKS(inferred) 로더 구현·fixture 검증. DesignDecision 로더는 유예. 아래 실현 절·change_condition)
 - 날짜: 2026-07-02
 - work item: wi_260702w4l (Risk/DesignDecision 적재 계약 초안; wi_260702jiu에서 이어짐)
 - 관계:
   - `ADR-20260701-semantic-layer-load-contract`를 **일반화(generalize·refine)**한다 — supersede 아님. 그 ADR은 의미층을 "요약(Summary)-of-target"으로 실현했고, 이 ADR은 같은 계약 원칙(provider-free·근거결박·`edge_kind='inferred'` 분리·provenance·atomic 거부)을 **1급 inferred 엔티티(자체 정체성을 가진 노드 + inferred 엣지)**로 확장한다. 그 ADR line 35가 범위 밖으로 뒀던 "설계결정/위험 대상"을 이 ADR이 계약 수준에서 명세한다.
   - `ADR-20260702-communityreport-load-contract`와 **형제**다 — 둘 다 유예된 inferred 층을 계약화한다. 단 CommunityReport는 Summary를 그대로 재사용(target=`Community`)하는 얇은 정련이고, 이 ADR은 **새 노드 라벨·엣지 타입을 신설**하는 확장이다.
-  - `ADR-20260701-v1-ontology-recall-reframe` §결정3(생성형·inferred 층 유예)이 유예한 층에 속한다 — 이 ADR은 그 유예를 *계약 수준*에서만 해제하고, 실코드(로더·노드·엣지)는 외부 생산자 확정까지 유예 유지.
+  - `ADR-20260701-v1-ontology-recall-reframe` §결정3(생성형·inferred 층 유예)이 유예한 층에 속한다 — 이 ADR은 그 유예를 계약 수준에서 해제하고 **Risk 로더를 실현**했다(wi_2607021h0, `kg/risk.py`); DesignDecision 로더와 실데이터 생성만 유예로 남는다(생성은 provider-free상 외부).
   - `DESIGN.md` §2/§2-bis 온톨로지 초안(엔티티 `DesignDecision(↔ADR)`·`Risk/Finding`; inferred 엣지 `DECIDES`/`SUPERSEDES`/`RISKS`/`ADDRESSES_RISK`)을 **적재 계약으로 구체화**한다.
 
 ## 맥락
@@ -22,7 +22,7 @@ Risk·DesignDecision 적재 계약을 다음으로 결정한다. `ADR-20260701`�
 
 1. **provider-free 유지.** "위험이다 / 결정이다"의 판정·생성은 전적으로 외부 생산자(예: ditto) 책임이다. palimpsest는 적재·형식강제만 하며 LLM을 호출하지 않는다.
 
-2. **새 inferred 노드 라벨 + namespace 격리 id.** 노드 라벨 `Risk`, `DesignDecision`(코드 라벨과 구분). id는 namespace 격리 — `risk:<sha256>`, `decision:<sha256>` — 로 코드 `qualified_name`(Java FQN/경로)과 절대 충돌하지 않는다(`summary:`/`community:` 선례, code=SoT `kg/summary.py`·`kg/community.py`). id 원료(멱등 rebuild용)는 생산자가 주는 안정 키(예: 정규화 title+source_commit)로 하되, 정확한 원료는 로더 구현 시 확정(유예).
+2. **새 inferred 노드 라벨 + namespace 격리 id.** 노드 라벨 `Risk`, `DesignDecision`(코드 라벨과 구분). id는 namespace 격리 — `risk:<sha256>`, `decision:<sha256>` — 로 코드 `qualified_name`(Java FQN/경로)과 절대 충돌하지 않는다(`summary:`/`community:` 선례, code=SoT `kg/summary.py`·`kg/community.py`). id 원료(멱등 rebuild용) — **Risk 실현**: `risk:`+sha256(정규화 `title`+`source_commit`+정렬 `flags`), flag 순서 불변·rebuild-stable(code=SoT `kg/risk.py`). DesignDecision id 원료는 그 로더 구현 시 확정(유예).
 
 3. **inferred 엣지 + `edge_kind='inferred'`.** 엣지 타입(`DESIGN.md` §2/§2-bis): `DECIDES`(DesignDecision→코드 노드 또는 다른 결정), `SUPERSEDES`(DesignDecision→DesignDecision), `RISKS`(Risk→코드 노드), `ADDRESSES_RISK`(DesignDecision→Risk). 모두 `edge_kind='inferred'`로 적재하며 `deterministic ⊎ inferred == total ∧ NULL==0` 규약을 그대로 지킨다.
 
@@ -34,7 +34,16 @@ Risk·DesignDecision 적재 계약을 다음으로 결정한다. `ADR-20260701`�
 
 7. **회상 노출 — 분리 채널·순회 격리.** Risk/DesignDecision는 items 순회로 누출되지 않게 `DECIDES`/`RISKS`/`SUPERSEDES`/`ADDRESSES_RISK`를 traversal 화이트리스트(`DEFAULT_RELATIONS`)에서 제외하고, Summary의 'summaries'처럼 **분리 채널**('risks'/'decisions' 또는 통합 'inferred')로 노출한다. 전용 진입점(`recall_risk` 등)은 구현 선택 — 유예.
 
-8. **로더·노드·엣지 구현은 유예.** 이 ADR은 **적재 규약만** 확정한다. IR/로더 확장(`Risk`/`DesignDecision` 모델, 엣지 상수, 전용 로더, 회상 채널)·payload 생산은 **외부 생산자가 확정돼 실제 payload가 생길 때** 착수한다. 계약만 세우고 코드는 세우지 않는다(빈 선반 금지).
+8. **구현 상태 — Risk 실현, DesignDecision 유예.** **Risk**: IR `Risk`/`RISKS` + 전용 로더 `kg/risk.py` 실현(2026-07-02, wi_2607021h0; 아래 실현 절). **DesignDecision**(`DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK` 및 엔티티-간 엣지)·회상 전용 채널·외부 payload 생산은 유예 — 실제 필요/생산자 확정 시 착수(빈 선반 금지).
+
+## 실현·검증된 사항 (code = SoT, 동작은 코드가 권위 — 여기 prose로 이중화하지 않음)
+
+**Risk 부분(2026-07-02, wi_2607021h0):**
+- IR: `RISK`/`RISKS` 상수 + frozen `Risk` 데이터클래스(`title`/`flags`/`generator`/`model`/`source_commit`/`created_at`/`confidence`/`semantic_verdict`; `code_bound_at`·`author`는 필드 아님 — Summary 선례) in `src/palimpsest/ir.py`.
+- 로더 `src/palimpsest/kg/risk.py`: `load_risks` — 구조 거부(generator/model/0-flag) → flags 선-resolve(미해소 entity-atomic 거부, silent no-op 없음) → `_RISK_MERGE`+`_RISKS_MERGE`(`edge_kind='inferred'`, MERGE-on-id 멱등). `risk_id`=namespace 격리 sha256. `code_bound_at`=`sorted(flags)[0]`의 committed_at.
+- 층 분리: `RISK`는 `NODE_LABELS`(constraint), `RISKS`는 `REL_TYPES`·`DEFAULT_RELATIONS` 모두 제외 — 결정론 writer가 안 건드리고 회상 items로 안 샌다(`kg/ingest.py`·`recall/graphrag.py`).
+- 테스트: `tests/kg/test_risk.py`(적재·grounding entity-atomic 거부·0-flag·멱등·partition 불변식·namespace 격리·순회 제외·verdict round-trip). 전체 72 passed, provider-free probe 유지.
+- 알려진 단순화[low]: multi-flag Risk의 `code_bound_at`은 `sorted(flags)[0]` 기준(노드+모든 엣지) — 단일 flag(테스트 커버)에선 정확, 다중 flag에선 각 엣지가 자기 대상이 아닌 flags[0]의 committed_at를 가짐(change_condition).
 
 ## 근거 (rationale)
 
@@ -48,7 +57,7 @@ Risk·DesignDecision 적재 계약을 다음으로 결정한다. `ADR-20260701`�
 
 ## 유예·범위 밖 (명시)
 
-- **로더·노드·엣지 구현** — IR의 `Risk`/`DesignDecision` 모델·엣지 상수, 전용 inferred 로더(endpoint resolve + entity-atomic 거부 + `edge_kind='inferred'` MERGE), 회상 분리 채널·진입점. 외부 생산자 확정 시 착수(change_condition).
+- **DesignDecision 로더·엣지** — `DesignDecision` 모델 + `DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK` 엣지 + 전용 로더. 유예(Risk는 실현). *(Risk 회상 전용 채널 `recall_risk`도 유예 — 현재 RISKS는 순회 제외만; 필요 시 분리 채널 추가.)*
 - **id 원료 확정** — 멱등 rebuild용 안정 id 원료(정규화 title+source_commit 등). 로더 구현 시 확정.
 - **외부 생산자 파이프라인** — Risk/DesignDecision 판정·생성(LLM/분석). palimpsest 밖(provider-free).
 - **DesignDecision 결정론 분리** — 대상 코퍼스에 *구조화된* 결정 기록(ADR류 파일)이 있으면 DesignDecision *노드*는 결정론 추출 가능(그 노드는 deterministic 층), 단 `DECIDES` *엣지*는 여전히 inferred(Community의 detection/report 분리 선례). 현재 대상엔 그런 기록이 없어 노드·엣지 모두 inferred로 둔다(change_condition).
@@ -57,7 +66,8 @@ Risk·DesignDecision 적재 계약을 다음으로 결정한다. `ADR-20260701`�
 
 ## 철회·변경 조건 (change_condition)
 
-- **활성화(proposed → active)**: 외부(ditto 측) 생산자가 Risk 또는 DesignDecision payload를 실제 생성하기로 확정되면, 이 계약대로 IR/로더/엣지/회상 채널을 구현하고 검증(테스트 + 독립 verify) 후 상태를 active로 올린다.
+- **활성화 — Risk 충족**(2026-07-02, wi_2607021h0): Risk 로더를 구현·fixture 검증해 active로 올렸다. DesignDecision 로더는 미구현(유예). 실제 외부 producer DATA는 provider-free상 외부이며 활성화 전제 아님(Summary 선례).
+- **multi-flag 신선도 재검토**: Risk `code_bound_at`이 multi-flag에서 `sorted(flags)[0]` 기준이라 다른 flag 대상의 stale 판정이 부정확할 수 있다 — multi-flag Risk가 실사용에서 흔해지면 엣지별 대상 committed_at 결박으로 정련.
 - **DesignDecision 결정론화**: 대상 코퍼스에 구조화된 결정 기록이 나타나면 DesignDecision 노드의 결정론 추출을 재검토한다(Community 선례, DECIDES 엣지는 inferred 유지).
 - **엣지 집합 재검토**: `CAUSALLY_RELATES`/`RELATES_TO`/`CONFLICTS_WITH` 등 추가 inferred 관계가 필요해지면 계약을 확장한다.
 - **엔티티 분리 재검토**: Risk와 DesignDecision의 적재 규약이 실사용에서 유의하게 갈리면 ADR을 둘로 분리한다(현재는 골격 공유라 하나).
