@@ -24,8 +24,8 @@
 - 🔶 **엔티티 타입(제안, v1 최소 + 확장):** `Commit` · `File` · `Symbol`(Function/Class/Module) · `Change`(diff 단위) · `Branch` · `Author`(사람/에이전트) · `DesignDecision`(↔ADR) · `Requirement` · (확장) `Conversation`/`AgentTrace` · `Community`(구조 그룹핑 ✅ 실현·결정론) / `CommunityReport`(요약 prose: 적재 ✅ 실현·생성 외부).
 - 🔶 **관계 타입(제안):** `MODIFIES` · `CALLS`/`DEPENDS_ON` · `IMPLEMENTS` · `DECIDES`/`SUPERSEDES` · `AUTHORED_BY` · `RISKS`/`CONFLICTS_WITH` · `EVOLVED_FROM`(이력 계보).
 - 🔶 **provenance:** 모든 노드·엣지에 `source`(commit SHA / 문서 / 대화) + `confidence` + `gap`(모르는 것). 생성형 추론은 반드시 이 셋으로 사실과 분리(세탁 금지).
-- 🔶 **신선도(2축, 제안):** ① **코드-결박 신선도** — 지식이 가리키는 코드 위치·심볼이 현재 커밋에 살아있나 · ② **결정-계보 신선도** — 이 지식이 더 최신 결정에 의해 supersede 됐나(이력은 보존하되 "현재 live" 판정). VISION의 "커밋 해시 기반 2축 신선도"를 이렇게 구체화 제안.
-- ⬜ **미결:** 정확한 2축 정의·계산 · 기억의 입도(granularity) · 임베딩 부착 대상과 차원 · 온톨로지 진화/버전 전략 · `Risk`를 노드로 둘지 관계로 둘지 → **노드 + `RISKS` 엣지로 실현**(`ADR-20260702-risk-designdecision-load-contract` active, `kg/risk.py`).
+- ✅ **신선도(2축, 실현):** ① **코드-결박 신선도** — 지식이 가리키는 코드가 현재 커밋에 살아있나(회상 `stale`, wi_260701v0q) · ② **결정-계보 신선도** — 결정이 더 최신 결정에 SUPERSEDE 됐나(`valid_from`/`valid_to`, 삭제 아닌 invalidate=이력 보존, `live`=valid_to null; ADR-20260702-decision-lineage-freshness, wi_260702c2m). VISION의 "커밋 해시 기반 2축 신선도"를 이렇게 실현.
+- ⬜ **미결:** 기억의 입도(granularity) · 임베딩 부착 대상과 차원 · 온톨로지 진화/버전 전략. *(2축 신선도 정의·계산은 ✅ 실현 — 코드-결박+결정-계보, §2-bis; `Risk` 노드화도 ✅ — `ADR-20260702-risk-designdecision-load-contract` active, `kg/risk.py`.)*
 
 ### 2-bis. node/edge 스키마 — 정적층 ✅ v1 실현 · 의미층 ◐ slice 4 부분 실현 *(2026-07-01, code=SoT)*
 
@@ -39,7 +39,7 @@
 - 🔶 **노드 — 정적층(CPG):** `Repo` · `Module/File` · `Type/Class` · `Method/Function` · `Variable/Local` · `CallSite` · `Community`(구조 그룹핑 ✅ 결정론). **의미층:** `Summary`(✅ slice 4)/`CommunityReport`(요약 prose ✅ 적재 실현·생성 외부) · `DesignDecision/ADR`(✅ 로더 실현·생성 외부) · `Risk/Finding`(✅ 로더 실현·생성 외부) · `Episode/SourceCommit`(✅).
 - 🔶 **엣지 — 결정론적 구조(`edge_kind=deterministic`, ✅ v1):** `CONTAINS` · `CALLS` · `IMPORTS` · `DEPENDS_ON` · `MEMBER_OF`(✅ Class→Community) · (제안) `REACHING_DEF`(DATAFLOW) · `INHERITS` · `REF`. **생성형 추론(`edge_kind=inferred`):** `SUMMARIZES`(✅ slice 4) · `RISKS`(✅ wi_2607021h0) · `DECIDES`(✅ wi_260702b48) · `SUPERSEDES`(✅) · `ADDRESSES_RISK`(✅) · `CAUSALLY_RELATES`(🔶) · `RELATES_TO`(🔶).
 - ✅ **정적/생성형 분리(세탁 금지):** ① 별도 edge label + ② 모든 엣지에 `edge_kind = deterministic|inferred` 속성. `deterministic ⊎ inferred == total ∧ NULL==0`을 writer+테스트로 강제(Neo4j Community 제약 부재). slice 4에서 inferred 값 첫 적재.
-- 🔶 **provenance·2축 신선도 = 엣지/노드 속성(Graphiti 패턴):** `source`=Episode/commit SHA(provenance) · `valid_from`/`valid_to`=결정-계보 신선도(삭제 대신 invalidate=전이력 보존, 🔶 미실현) · `code_bound_at`=코드-결박 신선도(✅ slice 4에서 대상 커밋 committed_at에 결박) · inferred일 때 `generator`/`model`/`confidence`/`created_at`(✅ slice 4).
+- 🔶 **provenance·2축 신선도 = 엣지/노드 속성(Graphiti 패턴):** `source`=Episode/commit SHA(provenance) · `valid_from`/`valid_to`=결정-계보 신선도(삭제 대신 invalidate=전이력 보존, `live`=valid_to null; ✅ 실현 — ADR-20260702-decision-lineage-freshness, wi_260702c2m, `kg/decision.py`+회상 decisions 채널) · `code_bound_at`=코드-결박 신선도(✅ slice 4에서 대상 커밋 committed_at에 결박) · inferred일 때 `generator`/`model`/`confidence`/`created_at`(✅ slice 4).
 
 ## 3. 아키텍처
 
@@ -94,6 +94,8 @@
 
 - ✅ **설계위험 감지 (slice 2)** (`wi_260702qe3`, **shipped·검증 통과**, ADR-20260702-risk-designdecision-load-contract item 7/8 실현): 구조적 결합 회상(`recall`/`recall_community`/`expand`) 결과에, 회상된 코드에 결박된 Risk·DesignDecision를 **분리 채널 `risks`/`decisions`로 표시**(역방향 조회: 코드 id→그것을 RISKS-flag/DECIDES하는 엔티티, `summaries` 채널 미러 — 근거 refs·edge_kind·code_bound_at·stale, items 누출 없음). 판정은 외부(provider-free), palimpsest는 구조적 표시만 = **Reconcile 씨앗**. wi_260702tad에서 유예했던 역방향+채널 통합을 여기서 완결(유예 없음). 검증: 98 passed + fresh-context 독립 리뷰 PASS(behavior-risk finding 0). code=SoT: `src/palimpsest/recall/graphrag.py`, `tests/recall/test_recall_design_risk.py`. *(recall_community의 CommunityReport('summaries') 표면화는 별도 ADR-20260702-communityreport-load-contract 소관으로 유예.)*
 
+- ✅ **신선도 2축(결정-계보)** (`wi_260702c2m`, **shipped·검증 통과**, ADR-20260702-decision-lineage-freshness): DesignDecision에 `valid_from`/`valid_to`(bi-temporal) 부착 — SUPERSEDES 적재가 피대상 결정을 **삭제 대신 invalidate**(전 이력 보존), `live`=valid_to null(read-time 파생), 회상 `decisions` 채널이 노출. 축 1(코드-결박 `stale`)과 직교. provider-free(SUPERSEDES 구조로부터 결정론 계산, LLM 0). 검증: 103 passed + fresh-context 독립 리뷰 PASS. code=SoT: `src/palimpsest/kg/decision.py`·`recall/graphrag.py`, `tests/kg/test_decision.py`·`tests/recall/test_recall_design_risk.py`.
+
 - 🔶 **유예된 의미층 후속** — 실적재 경로로 실제 사용·고통을 확인하고 각 ADR change-condition을 재검토한 뒤 착수:
 
   | 유예 항목 | 무엇 · 왜 유예 |
@@ -121,7 +123,7 @@
 
 - ✅ **DB substrate (v1)** — Neo4j Community 채택·실현(`src/palimpsest/kg`, testcontainers 검증). 단 성능·메모리·재구축 **실측 벤치는 여전히 미결**(스파이크 §4 지표). → `docs/spikes/db-substrate-spike.md` (`wi_2606264gw`).
 - ◐ **node/edge 설계** — 정적/결정론층 v1 실현 + 의미층 첫 적재 slice 4 실현(§2-bis). 코드-결박 신선도 **stale 판정은 실현**(wi_260701v0q, 회상 stale flag). 남은 미결: derived/inferred 엣지 생성 메커니즘 · LLM 추론 엣지 precision 가드레일(내용 검증, 유예 #1) · CPG intra-procedural → cross-branch 확장 · stale **재조정=자동 재생성**(provider-free 충돌로 경계 밖). → `docs/research/precompute-hugrag-kg.md`.
-- ◐ **스키마 상세** — 정적 엔티티/관계 + Summary/SUMMARIZES + `Community`/MEMBER_OF(결정론 구조 그룹핑, ADR-20260702)는 실현(code=SoT). 의미층 노드(`Risk`·`DesignDecision`는 **로더 실현** — `ADR-20260702-risk-designdecision-load-contract`(active), `kg/risk.py`·`kg/decision.py`; `CommunityReport`는 **로더 실현** — `ADR-20260702-communityreport-load-contract`(active); 생성만 외부)·신선도 2축(`valid_from/valid_to` 결정-계보)은 미결.
+- ◐ **스키마 상세** — 정적 엔티티/관계 + Summary/SUMMARIZES + `Community`/MEMBER_OF(결정론 구조 그룹핑, ADR-20260702)는 실현(code=SoT). 의미층 노드(`Risk`·`DesignDecision`는 **로더 실현** — `ADR-20260702-risk-designdecision-load-contract`(active), `kg/risk.py`·`kg/decision.py`; `CommunityReport`는 **로더 실현** — `ADR-20260702-communityreport-load-contract`(active); 생성만 외부)는 실현. 신선도 2축은 **실현**(코드-결박 stale + 결정-계보 `valid_from/valid_to`, ADR-20260702-decision-lineage-freshness).
 - ✅ **요약 durability** — git-tracked `summaries/` SoT + CLI `load <dir>` 재구축으로 **해소**(wi_260701ffv, 커밋 `e51a1b2`): Neo4j drop→reload 멱등 복원. 다중 대상 코드베이스별 요약 분리·요약 payload 생산 파이프라인은 후속 여지.
 - ✅ **recall boundedness/정확성** — `_RESOLVE` label-free id 충돌·순회 예산 client-side를 **해소**(wi_2607016ir, 커밋 `6197c80`): 결정적 tie-break + server-side Cypher `LIMIT`. `_SUMMARIES` row-bound 정책(병리적 고요약 노드에서 distinct summary vs row 단위)은 후속 여지.
 - ⬜ **임베딩 설계** — 부착 대상·차원·하이브리드 검색 구성(v1 미포함).
@@ -138,7 +140,8 @@
 - ✅ `ADR-20260702-community-deterministic-structural` — Community 멤버십 = 결정론적 구조 분할(Class 수준 연결 요소, `MEMBER_OF` deterministic, LLM·GDS 없음, `recall_community` 진입점). ADR-20260701-v1을 구체화(supersede 아님) — 유예된 것은 생성형 `CommunityReport` prose이고 그것은 계속 유예. (active) → [`adr/ADR-20260702-community-deterministic-structural.md`](adr/ADR-20260702-community-deterministic-structural.md)
 - ✅ `ADR-20260702-communityreport-load-contract` — CommunityReport 적재 계약 **실현**(active, wi_260702smx): `ADR-20260701` 적재 계약을 target=`Community`로 정련(Summary wire·`SUMMARIZES`·'summaries' 채널 재사용, grounding=멤버 Class로 강화, `code_bound_at`=Community `committed_at`). 로더(`_in_community` 멤버십-grounding)·fixture 검증 완료(59 passed). `ADR-20260702-community-deterministic-structural` line36 이행. 실데이터 생성은 provider-free상 외부; orphan 처리·`recall_community` 통합은 유예(change_condition). → [`adr/ADR-20260702-communityreport-load-contract.md`](adr/ADR-20260702-communityreport-load-contract.md)
 - ✅ `ADR-20260702-risk-designdecision-load-contract` — Risk·DesignDecision 적재 계약: `ADR-20260701`을 1급 inferred 엔티티로 일반화(namespace `risk:`/`decision:` id, inferred 엣지, grounded 노드 강제, 전용 로더). **양쪽 완전 실현**(active): `Risk`+`RISKS`(wi_2607021h0, `kg/risk.py`) · `DesignDecision`+`DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK`(wi_260702b48, `kg/decision.py`, 라벨체크), 88 passed. 회상 진입점(forward, wi_260702tad) + 역방향 `risks`/`decisions` 채널(wi_260702qe3, 설계위험 감지 slice 2, 98 passed) 실현. same-batch resolution은 유예. → [`adr/ADR-20260702-risk-designdecision-load-contract.md`](adr/ADR-20260702-risk-designdecision-load-contract.md)
-- 🔶 **ADR 후보(결정 굳으면 승격):** 신선도 2축 중 결정-계보(`valid_from·valid_to`) · 내용(semantic) 검증 방식·precision 가드레일(유예 #1) · 요약 durability git-SoT 계약(유예 #2) · 노출 형태(MCP/스킬).
+- ✅ `ADR-20260702-decision-lineage-freshness` — 신선도 2축(결정-계보): DesignDecision `valid_from`/`valid_to`(bi-temporal), SUPERSEDES 적재가 피대상을 invalidate(삭제 아님=전 이력 보존), `live`=valid_to null(read-time 파생), 회상 decisions 채널 노출. provider-free(SUPERSEDES 구조로부터 결정론 계산). 실현·검증(wi_260702c2m, 103 passed, 독립 리뷰 PASS). `ADR-20260702-risk-designdecision-load-contract` 확장. → [`adr/ADR-20260702-decision-lineage-freshness.md`](adr/ADR-20260702-decision-lineage-freshness.md)
+- 🔶 **ADR 후보(결정 굳으면 승격):** 내용(semantic) 검증 방식·precision 가드레일(유예 #1) · 요약 durability git-SoT 계약(유예 #2) · 노출 형태(MCP/스킬). *(신선도 2축 결정-계보는 ✅ 승격 — ADR-20260702-decision-lineage-freshness.)*
 
 ---
 
