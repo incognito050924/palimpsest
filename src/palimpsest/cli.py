@@ -6,6 +6,11 @@ Two stdlib-argparse subcommands wire the deterministic slice end to end:
       Extract the Java tree under PATH + read git provenance for the pinned
       commit, then create_constraints + ingest the IR into Neo4j.
 
+  backfill --repo PATH
+      Replay that same extract -> ingest over the FULL git history (every commit,
+      oldest -> newest) so the projection reflects the whole timeline, not just
+      HEAD. Provider-free, deterministic, idempotent; leaves the repo untouched.
+
   query SYMBOL_OR_FILE [--depth N] [--limit M]
       Run bounded, grounded recall from a seed (a symbol qualified_name or a
       repo-relative file path) and print the result as clearly SEPARATED
@@ -38,6 +43,7 @@ from pathlib import Path
 
 from neo4j import GraphDatabase
 
+from palimpsest.backfill import backfill
 from palimpsest.extract import extract, read_provenance
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
@@ -72,6 +78,15 @@ def _cmd_ingest(args) -> None:
     print(
         f"ingested {len(ir.nodes)} nodes, {len(ir.edges)} edges "
         f"from {args.repo} @ {prov.source_commit}"
+    )
+
+
+def _cmd_backfill(args) -> None:
+    with _driver() as driver:
+        result = backfill(driver, args.repo)
+    print(
+        f"backfilled {result.commits} commits from {args.repo} "
+        f"({result.nodes} nodes, {result.edges} edges at HEAD)"
     )
 
 
@@ -164,6 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--commit", default="HEAD", help="git commit to pin provenance to (default HEAD)"
     )
     p_ing.set_defaults(func=_cmd_ingest)
+
+    p_bf = sub.add_parser(
+        "backfill",
+        help="replay extract+ingest over the FULL git history (every commit)",
+    )
+    p_bf.add_argument("--repo", required=True, help="path to the Java repository root")
+    p_bf.set_defaults(func=_cmd_backfill)
 
     p_q = sub.add_parser(
         "query", help="grounded recall for a symbol or repo-relative file path"
