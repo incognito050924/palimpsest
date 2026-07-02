@@ -137,6 +137,39 @@ def _committed_at(session, node_id: str):
     return rec["committed_at"] if rec else None
 
 
+# A CommunityReport is a Summary whose target is a Community node — recognised by
+# the ``community:`` id namespace (mirrors kg.community.community_id). Such a
+# report carries the extra membership-grounding rule below.
+_COMMUNITY_NS = "community:"
+
+
+def _in_community(session, community_id: str, refs: set[str]) -> set[str]:
+    """Of ``refs``, the ids that belong to the target Community — a member Class,
+    or a node contained by a member Class (e.g. a Method of a member).
+
+    Enforces membership-grounding for a CommunityReport: a report ABOUT a
+    community must ground its claims in that community's members, not arbitrary
+    code. Refs not returned here are non-members and reject the whole report.
+    """
+    if not refs:
+        return set()
+    rows = session.run(
+        """
+        UNWIND $refs AS rid
+        MATCH (n {id: rid})
+        OPTIONAL MATCH (n)-[:MEMBER_OF]->(dc:Community {id: $cid})
+        OPTIONAL MATCH (owner:Class)-[:CONTAINS]->(n)
+        OPTIONAL MATCH (owner)-[:MEMBER_OF]->(oc:Community {id: $cid})
+        WITH rid, dc, oc
+        WHERE dc IS NOT NULL OR oc IS NOT NULL
+        RETURN DISTINCT rid AS id
+        """,
+        refs=list(refs),
+        cid=community_id,
+    )
+    return {r["id"] for r in rows}
+
+
 def _write(session, sid: str, s: Summary, endpoints: set[str], code_bound_at) -> None:
     claims = [json.dumps(c.to_dict(), ensure_ascii=False) for c in s.claims]
     # Neo4j properties are primitives/arrays, not maps, so the external judge's
@@ -203,6 +236,19 @@ def load_summaries(driver, summaries) -> SummaryLoadResult:
                     Rejection(sid, f"unresolved refs: {unresolved}")
                 )
                 continue
+
+            # Membership-grounding: a CommunityReport (target is a community: node)
+            # must ground every claim ref in a member of that community.
+            if s.target_id.startswith(_COMMUNITY_NS):
+                claim_refs = {ref for claim in s.claims for ref in claim.source_refs}
+                non_member = sorted(
+                    claim_refs - _in_community(session, s.target_id, claim_refs)
+                )
+                if non_member:
+                    rejections.append(
+                        Rejection(sid, f"non-member refs (not in target community): {non_member}")
+                    )
+                    continue
 
             _write(session, sid, s, endpoints, _committed_at(session, s.target_id))
             loaded += 1
