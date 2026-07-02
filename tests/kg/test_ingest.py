@@ -170,3 +170,34 @@ def test_reingest_is_idempotent(clean_db, ir):
 
     assert second_nodes == first_nodes
     assert second_rels == first_rels
+
+
+def _plan_operators(plan) -> list:
+    """Flatten a Neo4j EXPLAIN plan tree into a flat list of operator types."""
+    ops = [plan["operatorType"]]
+    for child in plan.get("children", []):
+        ops += _plan_operators(child)
+    return ops
+
+
+def test_relation_merge_resolves_endpoints_by_index_not_scan(clean_db):
+    """The relation writer must resolve edge endpoints by an indexed, LABELED
+    match — never a full AllNodesScan.
+
+    A labelless ``MATCH ({id: ...})`` cannot use the per-label id uniqueness
+    index (Neo4j 5 has no labelless property index), so it plans as AllNodesScan:
+    per edge that is O(total nodes), and backfill becomes superlinear as the graph
+    grows. Asserting the emitted query plans as a NodeIndexSeek pins the fix.
+    """
+    from palimpsest.kg.ingest import _REL_MERGE
+
+    query = "EXPLAIN " + _REL_MERGE.format(
+        rel=CALLS, src_label=METHOD, dst_label=METHOD
+    )
+    with clean_db.session() as session:
+        plan = session.run(
+            query, rows=[], edge_kind="deterministic"
+        ).consume().plan
+    ops = _plan_operators(plan)
+    assert "AllNodesScan@neo4j" not in ops, ops
+    assert any("IndexSeek" in op for op in ops), ops

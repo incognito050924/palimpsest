@@ -19,6 +19,8 @@ these (schema-enforced no-laundering separation).
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 from palimpsest.ir import (
     IR,
     REPO,
@@ -68,14 +70,17 @@ SET n.name          = row.name,
     n.code_bound_at = row.code_bound_at
 """
 
-# Endpoints are MATCHed (not merged): an edge whose target is unresolved/external
-# (e.g. IMPORTS java.util.Map — honest for a source-only parser) has no node to
-# attach to in the typed ontology, so it is dropped rather than materialised as
-# an untyped phantom node.
+# Endpoints are MATCHed (not merged) BY LABEL: an edge whose target is
+# unresolved/external (e.g. IMPORTS java.util.Map — honest for a source-only
+# parser) has no typed IR node, so it is dropped in ``ingest`` before the query
+# rather than materialised as an untyped phantom node. The MATCH carries the
+# endpoint's label so it uses the per-label id uniqueness index (a labelless
+# ``MATCH ({id: ...})`` cannot — Neo4j 5 has no labelless property index — and
+# plans as an AllNodesScan, making backfill superlinear as the graph grows).
 _REL_MERGE = """
 UNWIND $rows AS row
-MATCH (a {{id: row.src}})
-MATCH (b {{id: row.dst}})
+MATCH (a:`{src_label}` {{id: row.src}})
+MATCH (b:`{dst_label}` {{id: row.dst}})
 MERGE (a)-[r:`{rel}`]->(b)
 SET r.edge_kind     = $edge_kind,
     r.source_commit = row.source_commit,
@@ -156,9 +161,20 @@ def ingest(driver, ir: IR) -> None:
     for n in ir.nodes:
         nodes_by_label[n.kind].append(_node_row(n))
 
-    edges_by_type = {rel: [] for rel in REL_TYPES}
+    # Resolve each endpoint's label from THIS IR so the relation MERGE can MATCH
+    # by label (indexed). An edge materialises iff BOTH endpoints are real IR
+    # nodes; an unresolved endpoint (external target with no typed node) is
+    # skipped here — exactly the drop the old labelless MATCH produced. Grouping
+    # is keyed by (rel_type, src_label, dst_label) so each group runs one indexed
+    # query.
+    id_to_label = {n.id: n.kind for n in ir.nodes}
+    edges_by_group: dict = defaultdict(list)
     for e in ir.edges:
-        edges_by_type[e.kind].append(_edge_row(e))
+        src_label = id_to_label.get(e.src)
+        dst_label = id_to_label.get(e.dst)
+        if src_label is None or dst_label is None:
+            continue
+        edges_by_group[(e.kind, src_label, dst_label)].append(_edge_row(e))
 
     episodes = _episode_rows(ir)
 
@@ -168,13 +184,14 @@ def ingest(driver, ir: IR) -> None:
         for label, rows in nodes_by_label.items():
             if rows:
                 tx.run(_NODE_MERGE.format(label=label), rows=rows)
-        for rel, rows in edges_by_type.items():
-            if rows:
-                tx.run(
-                    _REL_MERGE.format(rel=rel),
-                    rows=rows,
-                    edge_kind=EDGE_KIND_DETERMINISTIC,
-                )
+        for (rel, src_label, dst_label), rows in edges_by_group.items():
+            tx.run(
+                _REL_MERGE.format(
+                    rel=rel, src_label=src_label, dst_label=dst_label
+                ),
+                rows=rows,
+                edge_kind=EDGE_KIND_DETERMINISTIC,
+            )
 
     with driver.session() as session:
         session.execute_write(_write)
