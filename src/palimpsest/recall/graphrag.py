@@ -396,6 +396,87 @@ def recall_community(driver, community_id, limit=25):
     return _result(items, [], None, [])
 
 
+# The inferred entities (Risk / DesignDecision), as SEPARATE entry points — the
+# same separation MEMBER_OF and SUMMARIZES get: their inferred edges (RISKS /
+# DECIDES / SUPERSEDES / ADDRESSES_RISK) are deliberately absent from
+# DEFAULT_RELATIONS, so an inferred entity can never leak into ordinary items
+# traversal; it is reachable only through its own dedicated recall below.
+
+# One row per code node a Risk flags (RISKS target), grounded, deterministic order.
+_RISK_FLAGS = """
+MATCH (:Risk {id: $id})-[:RISKS]->(t)
+RETURN t.id AS id, labels(t) AS labels, t.name AS name,
+       t.qualified_name AS qualified_name,
+       t.path AS path, t.start_line AS start_line, t.end_line AS end_line,
+       t.source_commit AS source_commit, t.committed_at AS committed_at
+ORDER BY id
+LIMIT $lim
+"""
+
+_RISK_EXISTS = "MATCH (r:Risk {id: $id}) RETURN r LIMIT 1"
+
+
+def recall_risk(driver, risk_id, limit=25):
+    """Recall the code a Risk flags, as a SEPARATE entry point.
+
+    ``risk_id`` is a ``Risk`` node id (``risk:<hash>``). Returns the same
+    ``{items, sources, summaries, gaps, confidence, expand_handle}`` shape — the
+    flagged code nodes are the grounded ``items`` (reached via the inferred
+    ``RISKS`` edge, commit + file:line via :func:`_sources`, author-omitted),
+    BOUNDED by ``limit``. Combinatorial only (a single RISKS query + dict
+    building) — no LLM, and RISKS is never walked as an ordinary traversal
+    relation. An unresolved id is an explicit gap, not a confident empty answer.
+    """
+    with driver.session() as session:
+        if session.run(_RISK_EXISTS, id=risk_id).single() is None:
+            gap = f"risk '{risk_id}' did not resolve to any Risk node in the graph"
+            return _result([], [gap], None, [])
+        rows = [r.data() for r in session.run(_RISK_FLAGS, id=risk_id, lim=limit)]
+    items = [_item(rec, "RISKS", 1) for rec in rows]
+    return _result(items, [], None, [])
+
+
+# One row per DesignDecision target, EACH carrying its own edge type as ``relation``
+# (DECIDES code|decision / SUPERSEDES decision / ADDRESSES_RISK risk). The three rel
+# types are a closed whitelist baked into the query — a decision's outgoing edges are
+# all inferred by construction; naming them keeps recall to the intended edges only.
+# Deterministic order (id, relation).
+_DECISION_TARGETS = """
+MATCH (:DesignDecision {id: $id})-[e:DECIDES|SUPERSEDES|ADDRESSES_RISK]->(t)
+RETURN t.id AS id, type(e) AS relation, labels(t) AS labels, t.name AS name,
+       t.qualified_name AS qualified_name,
+       t.path AS path, t.start_line AS start_line, t.end_line AS end_line,
+       t.source_commit AS source_commit, t.committed_at AS committed_at
+ORDER BY id, relation
+LIMIT $lim
+"""
+
+_DECISION_EXISTS = "MATCH (d:DesignDecision {id: $id}) RETURN d LIMIT 1"
+
+
+def recall_decision(driver, decision_id, limit=25):
+    """Recall what a DesignDecision commits to, as a SEPARATE entry point.
+
+    ``decision_id`` is a ``DesignDecision`` node id (``decision:<hash>``). Returns
+    the same ``{items, sources, summaries, gaps, confidence, expand_handle}`` shape
+    — the decision's targets are the ``items``, each labelled by its own edge type
+    (``relation`` = DECIDES / SUPERSEDES / ADDRESSES_RISK), BOUNDED by ``limit``.
+    A DECIDES *code* target is grounded (commit + file:line via :func:`_sources`);
+    SUPERSEDES / ADDRESSES_RISK targets are inferred entities (no code span), so
+    ``confidence`` (grounding coverage) reflects the mix honestly. Combinatorial
+    only (a single query + dict building) — no LLM, and these inferred edges are
+    never walked as ordinary traversal relations. An unresolved id is an explicit
+    gap, not a confident empty answer.
+    """
+    with driver.session() as session:
+        if session.run(_DECISION_EXISTS, id=decision_id).single() is None:
+            gap = f"decision '{decision_id}' did not resolve to any DesignDecision node in the graph"
+            return _result([], [gap], None, [])
+        rows = [r.data() for r in session.run(_DECISION_TARGETS, id=decision_id, lim=limit)]
+    items = [_item(rec, rec["relation"], 1) for rec in rows]
+    return _result(items, [], None, [])
+
+
 def expand(driver, handle, limit=25):
     """Pull the next hop from an ``expand_handle`` returned by :func:`recall`.
 
