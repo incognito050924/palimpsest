@@ -267,6 +267,7 @@ MATCH (d)-[e:DECIDES]->(g)
 RETURN d.id AS id, d.title AS title, d.decides AS anchors,
        d.code_bound_at AS code_bound_at, d.semantic_verdict AS semantic_verdict,
        d.confidence AS confidence, e.edge_kind AS edge_kind,
+       d.valid_from AS valid_from, d.valid_to AS valid_to,
        g.id AS ref_id, g.source_commit AS source_commit, g.path AS path,
        g.start_line AS start_line, g.end_line AS end_line,
        g.committed_at AS committed_at
@@ -315,6 +316,14 @@ def _entity_channel(rows) -> list:
                 "stale": False,
                 "_anchor": _bound_anchor(row.get("anchors")),
             }
+            # Decision-lineage freshness (2nd axis) — decisions channel only (the
+            # query returns valid_to; the risks query does not). The entry is still
+            # SURFACED when superseded (전이력 보존); ``live`` is the current-currency
+            # judgment, derived as valid_to IS NULL.
+            if "valid_to" in row:
+                entry["valid_from"] = row.get("valid_from")
+                entry["valid_to"] = row.get("valid_to")
+                entry["live"] = row.get("valid_to") is None
             by_id[row["id"]] = entry
         entry["refs"].append({"id": row["ref_id"], **_sources(row)})
         # Freshness follows the bound anchor's current committed_at (see loaders).

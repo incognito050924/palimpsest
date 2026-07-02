@@ -393,6 +393,73 @@ def test_semantic_verdict_round_trips_separate_from_confidence():
     assert back.semantic_verdict == verdict and back.confidence == 0.8
 
 
+# --- decision-lineage freshness: valid_from/valid_to (bi-temporal, wi_260702c2m) --
+# The 2nd freshness axis (§2-bis): a decision is "live" until a newer decision
+# SUPERSEDES it — then it is INVALIDATED (valid_to set), never deleted (전이력 보존).
+# Computed deterministically from the SUPERSEDES structure — provider-free, no LLM.
+
+
+def _valid(session, did):
+    return session.run(
+        "MATCH (d:DesignDecision {id: $id}) "
+        "RETURN d.valid_from AS vf, d.valid_to AS vt",
+        id=did,
+    ).single()
+
+
+def test_new_decision_is_live_with_valid_from_eq_created_at(ingested, ir):
+    method = next(n for n in ir.nodes if n.kind == METHOD)
+    dec = _decision(decides=(method.qualified_name,),
+                    created_at="2026-07-02T09:00:00+09:00")
+    assert load_design_decisions(ingested, [dec]).loaded == 1
+    with ingested.session() as session:
+        row = _valid(session, _did(dec))
+    assert row["vf"] == "2026-07-02T09:00:00+09:00"  # valid_from = created_at
+    assert row["vt"] is None                          # live (not yet superseded)
+
+
+def test_supersede_invalidates_prior_but_preserves_it(ingested, ir):
+    klass = next(n for n in ir.nodes if n.kind == CLASS)
+    method = next(n for n in ir.nodes if n.kind == METHOD)
+    prior = _decision(decides=(klass.qualified_name,), title="prior",
+                      created_at="2026-07-01T00:00:00+09:00")
+    assert load_design_decisions(ingested, [prior]).loaded == 1
+    prior_id = _did(prior)
+
+    newer = _decision(decides=(method.qualified_name,), supersedes=(prior_id,),
+                      title="newer", created_at="2026-07-02T00:00:00+09:00")
+    assert load_design_decisions(ingested, [newer]).loaded == 1
+
+    with ingested.session() as session:
+        prior_v = _valid(session, prior_id)
+        newer_v = _valid(session, _did(newer))
+        still = session.run(
+            "MATCH (d:DesignDecision {id: $id}) RETURN count(d) AS c", id=prior_id
+        ).single()["c"]
+    assert still == 1                                     # 전이력 보존: not deleted
+    assert prior_v["vt"] == "2026-07-02T00:00:00+09:00"  # invalidated at superseder's created_at
+    assert newer_v["vt"] is None                          # the superseder is live
+
+
+def test_reload_superseded_decision_does_not_reset_valid_to(ingested, ir):
+    klass = next(n for n in ir.nodes if n.kind == CLASS)
+    method = next(n for n in ir.nodes if n.kind == METHOD)
+    prior = _decision(decides=(klass.qualified_name,), title="prior",
+                      created_at="2026-07-01T00:00:00+09:00")
+    assert load_design_decisions(ingested, [prior]).loaded == 1
+    prior_id = _did(prior)
+    newer = _decision(decides=(method.qualified_name,), supersedes=(prior_id,),
+                      title="newer", created_at="2026-07-02T00:00:00+09:00")
+    assert load_design_decisions(ingested, [newer]).loaded == 1
+
+    # Re-load the prior decision (same id, MERGE): its lineage invalidation must
+    # survive (valid_to is ON-CREATE-only, never reset by a re-MERGE of the node).
+    assert load_design_decisions(ingested, [prior]).loaded == 1
+    with ingested.session() as session:
+        prior_v = _valid(session, prior_id)
+    assert prior_v["vt"] == "2026-07-02T00:00:00+09:00"  # NOT reset to null
+
+
 def test_semantic_verdict_absent_defaults_to_none():
     legacy = {
         "title": "t", "decides": ["pkg.Cls#m()"], "generator": "g", "model": "m",

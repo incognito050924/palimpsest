@@ -94,6 +94,7 @@ def decision_id(title: str, source_commit: str, targets) -> str:
 # ``$params`` so adversarial title text is inert.
 _DECISION_MERGE = """
 MERGE (d:DesignDecision {id: $id})
+ON CREATE SET d.valid_from = $created_at, d.valid_to = null
 SET d.title           = $title,
     d.decides         = $decides,
     d.supersedes      = $supersedes,
@@ -123,6 +124,18 @@ SET e.edge_kind     = $edge_kind,
     e.generator     = $generator,
     e.model         = $model,
     e.confidence    = $confidence
+"""
+
+
+# Decision-lineage freshness (2nd axis): loading a decision that SUPERSEDES a prior
+# one INVALIDATES the prior — set its ``valid_to`` to the superseder's ``created_at``
+# (when it stopped being current). The prior node is PRESERVED, never deleted (전이력
+# 보존); "live" is derived at read time as ``valid_to IS NULL``. Targets are already
+# resolved + label-checked (DesignDecision) up front, so every MATCH here materialises.
+_SUPERSEDE_INVALIDATE = """
+UNWIND $targets AS tid
+MATCH (t:DesignDecision {id: tid})
+SET t.valid_to = $valid_to
 """
 
 
@@ -202,6 +215,12 @@ def _write(session, did, d, decides, supersedes, addresses_risks, code_bound_at)
             model=d.model,
             confidence=d.confidence,
         )
+    # Decision-lineage freshness: invalidate (not delete) each superseded decision —
+    # its currency ends at THIS decision's created_at. Idempotent SET; the superseded
+    # node is preserved (전이력 보존), and re-loading it never resets valid_to (that is
+    # ON-CREATE-only on the node's own MERGE).
+    if supersedes:
+        session.run(_SUPERSEDE_INVALIDATE, targets=supersedes, valid_to=d.created_at)
 
 
 def load_design_decisions(driver, decisions) -> DesignDecisionLoadResult:

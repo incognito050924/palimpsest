@@ -101,6 +101,34 @@ def test_design_risk_channels_bounded_by_limit(design_risk_db):
     assert len(out["decisions"]) <= 1
 
 
+def test_decisions_channel_exposes_lineage_freshness(design_risk_db):
+    """ac-3 (신선도 2축): a live decision surfaces valid_from + valid_to=None + live=True."""
+    driver, _, did = design_risk_db
+    out = recall(driver, CTRL_METHOD, depth=1)
+    entry = next(d for d in out["decisions"] if d["id"] == did)
+    assert entry["valid_from"]          # bi-temporal valid_from present
+    assert entry["valid_to"] is None    # not superseded
+    assert entry["live"] is True        # -> live
+
+
+def test_decisions_channel_marks_superseded_not_live(recall_db):
+    """A superseded decision is still SURFACED (전이력 보존) but flagged not-live."""
+    d0 = _decision([CTRL_METHOD], "old: keep punch-in inline")
+    assert load_design_decisions(recall_db, [d0]).loaded == 1
+    d0_id = decision_id(d0.title, d0.source_commit, sorted({CTRL_METHOD}))
+    d1 = DesignDecision(
+        title="new: extract punch-in", decides=(SVC,), supersedes=(d0_id,),
+        addresses_risks=(), generator="fixture-dec-gen", model="m1",
+        source_commit=COMMIT, created_at="2026-07-03T00:00:00+09:00",
+    )
+    assert load_design_decisions(recall_db, [d1]).loaded == 1
+
+    out = recall(recall_db, CTRL_METHOD, depth=1)
+    entry = next(d for d in out["decisions"] if d["id"] == d0_id)
+    assert entry["valid_to"] == "2026-07-03T00:00:00+09:00"  # invalidated at superseder's time
+    assert entry["live"] is False                            # not live, yet still surfaced
+
+
 def test_recall_community_surfaces_member_risk_and_decision(recall_db, ir):
     """ac-3: 구조적 결합(community) 회상 위에 멤버 Class에 결박된 위험/결정 표시."""
     aug = copy.deepcopy(ir)
