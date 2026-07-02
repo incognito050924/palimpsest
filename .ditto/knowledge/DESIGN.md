@@ -89,7 +89,7 @@
   | 유예 항목 | 무엇 · 왜 유예 |
   |---|---|
   | **#1 내용(semantic) 검증층** — ◐ 부분 shipped | **배선 실현**(wi_260701ulo, 커밋 `f1074ad`): 외부 판정자(ditto)가 만든 verdict를 `Summary.semantic_verdict`로 ingest·annotate(unfaithful도 로드, 회상 flag 노출), provider-free 유지. **후속(ditto 측)**: 판정 하네스·라벨 코퍼스·per-claim. 코퍼스는 Java 전용 추출기 제약(self-Python-repo 불가). |
-  | **#3 요약 대상 확장** | `Risk`/`DesignDecision` 노드로 요약 대상 확대. 그 노드 타입이 아직 KG에 부재(생산자 없음) → 온톨로지 신설 선행. *(`Community` 구조 노드는 실현 — 위 roadmap 참조. 남은 것은 각 Community에 붙는 `CommunityReport` 생성형 요약 prose로, 외부 LLM 생산자 필요·범위 밖.)* |
+  | **#3 요약 대상 확장** | `Risk`/`DesignDecision` 노드로 요약 대상 확대. 그 노드 타입이 아직 KG에 부재(생산자 없음) → 온톨로지 신설 선행. *(`Community` 구조 노드는 실현 — 위 roadmap 참조. 각 Community에 붙는 `CommunityReport` 생성형 요약 prose는 **적재 계약 초안됨**(🔶 proposed, `ADR-20260702-communityreport-load-contract` — Summary 계약을 target=`Community`로 정련: 멤버십-grounding·`SUMMARIZES` 재사용·'summaries' 채널·`code_bound_at`=Community `committed_at`). 로더·외부 LLM 생산자는 유예.)* |
 
   *(#2 durability·#4 stale detect는 shipped — 아래 로드맵 참조. #4의 자동 재생성은 provider-free 충돌로 경계 밖 유지.)*
 
@@ -111,7 +111,7 @@
 
 - ✅ **DB substrate (v1)** — Neo4j Community 채택·실현(`src/palimpsest/kg`, testcontainers 검증). 단 성능·메모리·재구축 **실측 벤치는 여전히 미결**(스파이크 §4 지표). → `docs/spikes/db-substrate-spike.md` (`wi_2606264gw`).
 - ◐ **node/edge 설계** — 정적/결정론층 v1 실현 + 의미층 첫 적재 slice 4 실현(§2-bis). 코드-결박 신선도 **stale 판정은 실현**(wi_260701v0q, 회상 stale flag). 남은 미결: derived/inferred 엣지 생성 메커니즘 · LLM 추론 엣지 precision 가드레일(내용 검증, 유예 #1) · CPG intra-procedural → cross-branch 확장 · stale **재조정=자동 재생성**(provider-free 충돌로 경계 밖). → `docs/research/precompute-hugrag-kg.md`.
-- ◐ **스키마 상세** — 정적 엔티티/관계 + Summary/SUMMARIZES + `Community`/MEMBER_OF(결정론 구조 그룹핑, ADR-20260702)는 실현(code=SoT). 의미층 나머지 노드(`Risk`/`DesignDecision`, 유예 #3, 및 `CommunityReport` 생성형 요약 prose)·신선도 2축(`valid_from/valid_to` 결정-계보)·`Risk` 노드 vs 관계는 미결.
+- ◐ **스키마 상세** — 정적 엔티티/관계 + Summary/SUMMARIZES + `Community`/MEMBER_OF(결정론 구조 그룹핑, ADR-20260702)는 실현(code=SoT). 의미층 나머지 노드(`Risk`/`DesignDecision`, 유예 #3; `CommunityReport` 생성형 요약 prose는 적재 계약 초안됨 — `ADR-20260702-communityreport-load-contract`, 로더 유예)·신선도 2축(`valid_from/valid_to` 결정-계보)·`Risk` 노드 vs 관계는 미결.
 - ✅ **요약 durability** — git-tracked `summaries/` SoT + CLI `load <dir>` 재구축으로 **해소**(wi_260701ffv, 커밋 `e51a1b2`): Neo4j drop→reload 멱등 복원. 다중 대상 코드베이스별 요약 분리·요약 payload 생산 파이프라인은 후속 여지.
 - ✅ **recall boundedness/정확성** — `_RESOLVE` label-free id 충돌·순회 예산 client-side를 **해소**(wi_2607016ir, 커밋 `6197c80`): 결정적 tie-break + server-side Cypher `LIMIT`. `_SUMMARIES` row-bound 정책(병리적 고요약 노드에서 distinct summary vs row 단위)은 후속 여지.
 - ⬜ **임베딩 설계** — 부착 대상·차원·하이브리드 검색 구성(v1 미포함).
@@ -126,7 +126,8 @@
 - ✅ `ADR-20260701-v1-ontology-recall-reframe` — v1 재프레임(설계위험→온톨로지+회상), VISION §다음단계#1 supersede + 실현된 정적 스키마·기술 결정(tree-sitter-java·Neo4j·`edge_kind` 구성강제·조합형 회상). (active) → [`adr/ADR-20260701-v1-ontology-recall-reframe.md`](adr/ADR-20260701-v1-ontology-recall-reframe.md)
 - ✅ `ADR-20260701-semantic-layer-load-contract` — 의미층 적재 계약: provider-free(LLM 0), 외부 요약을 근거결박·`edge_kind='inferred'` 분리·provenance 강제로 적재, 회상 'summaries' 분리 채널. 내용검증·durability·대상확장·자동재생성은 유예/범위 밖(change-condition 명시). (active) → [`adr/ADR-20260701-semantic-layer-load-contract.md`](adr/ADR-20260701-semantic-layer-load-contract.md)
 - ✅ `ADR-20260702-community-deterministic-structural` — Community 멤버십 = 결정론적 구조 분할(Class 수준 연결 요소, `MEMBER_OF` deterministic, LLM·GDS 없음, `recall_community` 진입점). ADR-20260701-v1을 구체화(supersede 아님) — 유예된 것은 생성형 `CommunityReport` prose이고 그것은 계속 유예. (active) → [`adr/ADR-20260702-community-deterministic-structural.md`](adr/ADR-20260702-community-deterministic-structural.md)
-- 🔶 **ADR 후보(결정 굳으면 승격):** 신선도 2축 중 결정-계보(`valid_from·valid_to`) · 내용(semantic) 검증 방식·precision 가드레일(유예 #1) · 요약 durability git-SoT 계약(유예 #2) · 의미층 대상 온톨로지(`Risk`/`DesignDecision`, 유예 #3, 및 `CommunityReport` 생성형 요약) · 노출 형태(MCP/스킬).
+- 🔶 `ADR-20260702-communityreport-load-contract` — CommunityReport 적재 **계약 초안**(proposed): `ADR-20260701` 적재 계약을 target=`Community`로 정련(Summary wire shape·`SUMMARIZES`·'summaries' 채널 재사용, grounding=멤버 Class로 강화, `code_bound_at`=Community `committed_at`). `ADR-20260702-community-deterministic-structural` line36(CommunityReport→ADR-20260701 라우팅) 이행. **로더·노드 구현은 외부 생산자 확정까지 유예**(→active 조건은 change_condition). → [`adr/ADR-20260702-communityreport-load-contract.md`](adr/ADR-20260702-communityreport-load-contract.md)
+- 🔶 **ADR 후보(결정 굳으면 승격):** 신선도 2축 중 결정-계보(`valid_from·valid_to`) · 내용(semantic) 검증 방식·precision 가드레일(유예 #1) · 요약 durability git-SoT 계약(유예 #2) · 의미층 대상 온톨로지(`Risk`/`DesignDecision`, 유예 #3) · 노출 형태(MCP/스킬).
 
 ---
 

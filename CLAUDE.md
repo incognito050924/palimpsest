@@ -352,5 +352,7 @@ Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summ
 - ADR-20260626-foundational-architecture · active · ADR-20260626-foundational-architecture — palimpsest 정초 아키텍처: Knowledge Graph 본체 + GraphRAG 회상층
 - ADR-20260701-semantic-layer-load-contract · active · ADR-20260701-semantic-layer-load-contract — palimpsest 의미층 적재 계약: provider-free, 근거결박·inferred 분리·분리 채널 회상
 - ADR-20260701-v1-ontology-recall-reframe · active · ADR-20260701-v1-ontology-recall-reframe — v1 첫 슬라이스 재프레임: 설계위험 감지 → 온톨로지 + grounded 회상
+- ADR-20260702-community-deterministic-structural · active · ADR-20260702-community-deterministic-structural — Community 멤버십 = 결정론적 구조 분할(inferred 아님), CommunityReport prose는 유예
+- ADR-20260702-communityreport-load-contract · proposed · ADR-20260702-communityreport-load-contract — CommunityReport 적재 계약: ADR-20260701 적재 계약을 target=Community로 정련(로더 유예)
 
 <!-- ditto:knowledge:end -->
