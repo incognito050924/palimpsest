@@ -98,6 +98,8 @@
 
 - ✅ **CommunityReport 표면화** (`wi_260702dbu`, **shipped·검증 통과**, ADR-20260702-communityreport-load-contract 회상 노출 충족): `recall_community(cid)`가 그 커뮤니티의 CommunityReport(멤버 Class에 grounding된 Summary)를 **'summaries' 채널로 표면화** — 멤버 items로 main recall과 동일한 역방향 조회, items 누출 없음. 마지막 회상 채널 갭 닫음. provider-free. 검증: 104 passed. code=SoT: `src/palimpsest/recall/graphrag.py`(recall_community), `tests/recall/test_recall_community_report.py`. *(멤버십 변경 시 orphan report 처리는 여전히 유예 — 별개 freshness concern.)*
 
+- ✅ **backfill 전 git 이력** (`wi_260702asn`, **shipped·검증 통과**, ADR-20260702-backfill-history-capture): `backfill(driver, repo_path)` — `git log --reverse`로 전 커밋을 oldest→newest 순회, 각 커밋 트리를 **`git archive`로 임시 디렉터리에 materialize**(원 repo 비-mutating, checkout 아님) 후 기존 `extract`→`ingest` 반복. 코드 노드는 MERGE로 HEAD projection(committed_at=newest), 커밋마다 Episode(전 이력). Repo id는 원 repo명으로 pin해 단일 노드 보장(불변식 테스트). provider-free·멱등. CLI `backfill --repo`. 버전드 스냅샷 노드·per-commit 변경 링크는 범위 밖(change_condition). 검증: 118 passed + fresh-context 독립 리뷰 PASS(behavior-risk finding 0). code=SoT: `src/palimpsest/backfill.py`·`cli.py`, `tests/backfill/`.
+
 - ✅ **inferred 엣지 확장** (`wi_260702rnu`, **shipped·검증 통과**, ADR-20260702-risk-designdecision-load-contract 엣지집합 확장 충족): `CAUSALLY_RELATES`/`RELATES_TO`/`CONFLICTS_WITH`를 **1급 노드 없는 순수 inferred 엣지**로 일반화 — 전용 로더 `kg/relation.py`(`load_relations`: 양 endpoint grounding·entity-atomic 거부·닫힌 rel_type·MERGE 멱등·provider-free) + 회상 'relations' 채널(회상된 노드에 걸린 관계 역방향 조회, 순회 격리, 8→9키). 소비자=설계위험 감지 충돌(CONFLICTS_WITH) 표시. 검증: 113 passed + fresh-context 독립 리뷰 PASS(behavior-risk finding 0). code=SoT: `src/palimpsest/kg/relation.py`·`recall/graphrag.py`, `tests/kg/test_relation.py`·`tests/recall/test_recall_design_risk.py`. *(self-loop·symmetric 관계 directed 저장은 생성자 책임, change_condition.)*
 
 - 🔶 **유예된 의미층 후속** — 실적재 경로로 실제 사용·고통을 확인하고 각 ADR change-condition을 재검토한 뒤 착수:
@@ -117,7 +119,7 @@
   | 위험판정 **퀄리티** | Curate 정밀도, recall@k, 헛경보 억제 |
   | **push** 능동 경고 | Recall push 트리거·개입시점 |
   | **페르소나** 회상 | 소비자별 뷰(PM/아키텍트/…) |
-  | 전체 **backfill** | Capture 소급 발굴(전 git 이력) |
+  | 전체 **backfill** ✅ | Capture 소급 발굴(전 git 이력) = git-archive replay(wi_260702asn 실현, 위 로드맵) |
   | **에이전트 트레이스** 캡처 | `Conversation`/`AgentTrace` 엔티티 |
   | **전체 온톨로지** | §2 엔티티·관계 전체 |
   | **Reconcile** 본격 | 브랜치 간 신선도 중재 |
@@ -145,6 +147,7 @@
 - ✅ `ADR-20260702-communityreport-load-contract` — CommunityReport 적재 계약 **실현**(active, wi_260702smx): `ADR-20260701` 적재 계약을 target=`Community`로 정련(Summary wire·`SUMMARIZES`·'summaries' 채널 재사용, grounding=멤버 Class로 강화, `code_bound_at`=Community `committed_at`). 로더(`_in_community` 멤버십-grounding)·fixture 검증 완료(59 passed). `ADR-20260702-community-deterministic-structural` line36 이행. 실데이터 생성은 provider-free상 외부; `recall_community` 표면화 실현(wi_260702dbu); orphan 처리만 유예(change_condition). → [`adr/ADR-20260702-communityreport-load-contract.md`](adr/ADR-20260702-communityreport-load-contract.md)
 - ✅ `ADR-20260702-risk-designdecision-load-contract` — Risk·DesignDecision 적재 계약: `ADR-20260701`을 1급 inferred 엔티티로 일반화(namespace `risk:`/`decision:` id, inferred 엣지, grounded 노드 강제, 전용 로더). **양쪽 완전 실현**(active): `Risk`+`RISKS`(wi_2607021h0, `kg/risk.py`) · `DesignDecision`+`DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK`(wi_260702b48, `kg/decision.py`, 라벨체크), 88 passed. 회상 진입점(forward, wi_260702tad) + 역방향 `risks`/`decisions` 채널(wi_260702qe3, 설계위험 감지 slice 2, 98 passed) 실현. same-batch resolution은 유예. → [`adr/ADR-20260702-risk-designdecision-load-contract.md`](adr/ADR-20260702-risk-designdecision-load-contract.md)
 - ✅ `ADR-20260702-decision-lineage-freshness` — 신선도 2축(결정-계보): DesignDecision `valid_from`/`valid_to`(bi-temporal), SUPERSEDES 적재가 피대상을 invalidate(삭제 아님=전 이력 보존), `live`=valid_to null(read-time 파생), 회상 decisions 채널 노출. provider-free(SUPERSEDES 구조로부터 결정론 계산). 실현·검증(wi_260702c2m, 103 passed, 독립 리뷰 PASS). `ADR-20260702-risk-designdecision-load-contract` 확장. → [`adr/ADR-20260702-decision-lineage-freshness.md`](adr/ADR-20260702-decision-lineage-freshness.md)
+- ✅ `ADR-20260702-backfill-history-capture` — 전 git 이력 backfill: `git log --reverse`로 전 커밋을 `git archive`(비-mutating, checkout 아님)로 materialize해 기존 extract→ingest replay. projection 모델을 이력 전체에 적용(코드 노드=HEAD MERGE·커밋별 Episode; 버전드 스냅샷은 범위 밖), Repo id pin으로 단일 노드 불변식. provider-free·멱등. 실현·검증(wi_260702asn, 118 passed, 독립 리뷰 PASS). ADR-20260626 git=SoT·전 이력 보존 실현. → [`adr/ADR-20260702-backfill-history-capture.md`](adr/ADR-20260702-backfill-history-capture.md)
 - 🔶 **ADR 후보(결정 굳으면 승격):** 내용(semantic) 검증 방식·precision 가드레일(유예 #1) · 요약 durability git-SoT 계약(유예 #2) · 노출 형태(MCP/스킬). *(신선도 2축 결정-계보는 ✅ 승격 — ADR-20260702-decision-lineage-freshness.)*
 
 ---
