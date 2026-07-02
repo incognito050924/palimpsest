@@ -26,3 +26,6 @@ venv/
 
 # ditto managed-file backups
 *.ditto_bak
+
+# benchmark run logs (noisy driver warnings; JSON results are the tracked artifact)
+bench/results/*.log
