@@ -12,7 +12,7 @@ import pytest
 
 from palimpsest.ir import REPO, Summary, SummaryClaim
 from palimpsest.kg import augment_communities, community_id, ingest, load_summaries
-from palimpsest.recall import recall
+from palimpsest.recall import recall, recall_community
 
 CTRL = "kr.co.ecoletree.service.commute.controller.CommuteController"
 SVC = "kr.co.ecoletree.service.commute.service.CommuteService"
@@ -56,6 +56,24 @@ def test_community_report_surfaces_in_summaries_channel(report_recall_db):
     assert entry["refs"]                      # grounded in its member refs
 
     # No laundering: the report never enters the items channel.
+    for it in out["items"]:
+        assert it["kind"] != "Summary"
+        assert not it["id"].startswith("summary:")
+
+
+def test_community_report_surfaces_via_recall_community(report_recall_db):
+    """wi_260702dbu: recalling the community by id surfaces its report in the
+    summaries channel too (member Classes ground it), not only via a member's
+    main recall. The report never leaks into the member items channel."""
+    driver, cid = report_recall_db
+    out = recall_community(driver, cid)
+
+    entry = next((s for s in out["summaries"] if s["target_id"] == cid), None)
+    assert entry is not None                 # the community's report surfaces here
+    assert entry["edge_kind"] == "inferred"  # inferred marker off the SUMMARIZES edge
+    assert entry["refs"]                      # grounded in its member refs
+
+    # No laundering: the report never enters the member items channel.
     for it in out["items"]:
         assert it["kind"] != "Summary"
         assert not it["id"].startswith("summary:")

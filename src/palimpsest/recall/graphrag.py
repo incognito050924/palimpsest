@@ -527,12 +527,13 @@ def recall_community(driver, community_id, limit=25):
             return _result([], [gap], None, [])
         rows = [r.data() for r in session.run(_COMMUNITY_MEMBERS, id=community_id, lim=limit)]
     items = [_item(rec, MEMBER_OF, 1) for rec in rows]
-    # 구조적 결합(community) 위에 위험/결정 표시 (slice 2): member classes' attached
-    # Risks/DesignDecisions surface in their channels. The 'summaries' channel stays
-    # empty here — surfacing a community's CommunityReport via recall_community is a
-    # separate deferral owned by ADR-20260702-communityreport-load-contract, not this.
+    # 구조적 결합(community) 위에 inferred 표시: member classes' attached Summaries
+    # (incl. the community's own CommunityReport, which grounds in member Classes),
+    # Risks and DesignDecisions surface in their separate channels — same reverse
+    # lookup as main recall, keyed off the member ids. Never merged into items.
     return _result(
-        items, [], None, [],
+        items, [], None,
+        _summaries(driver, items, limit),
         _risks(driver, items, limit),
         _decisions(driver, items, limit),
     )
