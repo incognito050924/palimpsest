@@ -1,39 +1,56 @@
-# HANDOFF — palimpsest (cross-PC)
+# HANDOFF — palimpsest (cross-session)
 
-다른 세션/PC 이어받기용. `.ditto/local/`은 gitignore라 넘어오지 않으므로 남은 작업은 **코드·계획 SoT 기준**으로 적는다. 이 문서는 배경 지침이지 권위가 아니다 — **계획 SoT는 `.ditto/knowledge/DESIGN.md`**, 사실·동작은 `src/palimpsest/`·ADR. 새 세션에서 grep/test로 재확인할 것.
+다른 세션/PC 이어받기용. `.ditto/local/`은 gitignore라 안 넘어오므로 남은 작업은 **코드·계획 SoT 기준**으로 적는다. 이 문서는 배경 지침이지 권위가 아니다 — **계획 SoT는 `.ditto/knowledge/DESIGN.md`**, 사실·동작은 `src/palimpsest/`·ADR, 합의된 의도·수용기준은 work item. 새 세션에서 grep/test로 재확인할 것.
 
-## 0. 전파 상태 (먼저 볼 것)
-- **resume**: 브랜치 **`feat/community-node-wi2607010n6`** (main 아님). `git fetch origin && git checkout feat/community-node-wi2607010n6`로 `a512683`까지. main보다 2 커밋 앞. **main 병합은 미정 — 사용자 결정** (PR 또는 fast-forward). 히스토리 재작성 없음.
-- origin: `github.com/incognito050924/palimpsest.git` (이 repo만). **코퍼스 repo EcoleTreeSystems(`~/dev/project/java/workspace/EcoleTreeSystems`)에 git 작업 금지 — 읽기 전용.**
-- **인터프리터**: 이 PC엔 `~/.pyenv/shims/python` 없음. repo 루트 `.venv/bin/python`(homebrew python3.12, `pip install -e ".[test]"`). `.venv`는 gitignore.
-- 테스트: `DITTO_AUTOPILOT_BYPASS=1 .venv/bin/python -m pytest -q` (Docker 데몬 필요 — testcontainers Neo4j; `open -a Docker` 후 ~20초). 현재 **55 passed** (47 baseline + 8 Community).
-- **안 넘어오는 것(.ditto/local)**: work item `wi_2607010n6` record(status=done), `autopilot.json`, `intent.json`, coverage run 등. 새 PC엔 없다 — 아래 남은 작업은 코드/DESIGN 기준으로만 판단.
+## 0. 사용자 목표 (북극성)
+- **DESIGN.md 로드맵 전체를 끝까지 완주하는 것** (여러 세션 마라톤). 이번 세션은 그 일부.
+- **불변식(잠긴 결정, ADR): provider-free** — palimpsest는 LLM을 절대 호출하지 않는다. inferred 층의 *생성·판정*은 전부 외부(ditto 등), palimpsest는 *적재·형식강제·회상*만. 이게 방향타다.
 
-## 1. 이번 세션에 landed (feat 브랜치, 7ff99b7→a512683)
-- `727da11` **#3 요약 대상 확장 — Community 노드타입 신설 (behavioral)**: deterministic 구조 묶음, provider-free. Class 레벨 무방향 연결요소(GDS 없이 순수 Python union-by-min-root), `community:`+sha256(정렬 멤버) id로 재빌드 멱등, `(:Class)-[:MEMBER_OF]->(:Community)` `edge_kind=deterministic`. `recall_community` 진입점(멤버 Class bounded·grounded·author-omit·LLM-free, MEMBER_OF는 traversal 화이트리스트 제외). 신설 `src/palimpsest/kg/community.py`, 수정 `ir.py`/`kg/ingest.py`/`kg/__init__.py`/`recall/graphrag.py`/`recall/__init__.py`/`cli.py`. 테스트 `tests/kg/test_community.py`(5)·`tests/recall/test_recall_community.py`(3). ADR `ADR-20260702-community-deterministic-structural` 신설(ADR-20260701-v1과 refine) + DESIGN §2-bis/§6 갱신(Community 구조 ✅ / CommunityReport prose 🔶 분리).
-- `a512683` **chore(structural)**: `.gitignore`에 `*.iml`·`*.ditto_bak` 추가.
-- heavy path로 진행(deep-interview → coverage sweep → TDD → fresh verifier/reviewer). 4/4 AC evidence-backed pass, work item done(final_verdict=pass).
+## 1. 전파 상태 (먼저 볼 것)
+- **resume**: 브랜치 **`feat/community-node-wi2607010n6`** (main 아님). tip = **`3090973`**. main보다 **9 커밋 앞**, 0 뒤. 히스토리 재작성 없음. **push 안 함**(사용자: 나중에). **main 병합 미정 — 사용자 결정.**
+- origin: `github.com/incognito050924/palimpsest.git`. **코퍼스 repo EcoleTreeSystems 읽기 전용 — git 작업 금지.**
+- **인터프리터(이 PC)**: `~/.pyenv/shims/python`(3.13.5). `.venv` 없음(이전 핸드오프 PC와 다름). 설치: `~/.pyenv/shims/python -m pip install -e ".[test]"`.
+- 테스트: `DITTO_AUTOPILOT_BYPASS=1 ~/.pyenv/shims/python -m pytest -q` (Docker 필요 — testcontainers Neo4j; `open -a Docker`). 현재 **88 passed**.
 
-## 2. 남은 작업 — DESIGN §6 유예 (전부 외부 생산자 의존, inferred)
-#3 유예 4개 중 #2·#4·#1·#3 완료. **구조적 유예 항목은 모두 소진.** 남은 건 "판정/생성이 palimpsest 밖"이라 유예된 inferred 층뿐:
-- **CommunityReport 요약 prose**: Community 구조(멤버십)는 이번에 실현. 그 묶음이 "무엇에 관한 것인지" 설명하는 요약 글은 LLM 생성이라 provider-free상 **외부 생산자 계약**이 있어야 함. 계약 없으면 빈 선반(#3 Community 부분의 논리적 후속).
-- **Risk / DesignDecision 노드타입**: 의미 판정이라 외부 생산자 필요(inferred). 생산자 계약 없이 노드타입만 만들지 말 것(빈 선반).
-- 공통 착수 조건: **외부(ditto 측) 생산자 계약이 먼저.** 계약 서면 Community 요약 적재 계약(Summary/SUMMARIZES 선례) 재사용 가능.
-- **Java 전용 추출기 제약**: `src/palimpsest/extract/java.py`가 `*.java`만. 자기 repo(Python) 코퍼스 불가 — 테스트 코퍼스는 `tests/**/fixtures`의 Java.
+## 2. 이번 세션 landed (feat 브랜치, 96e341d 이후)
+"외부 계약 초안 → 로더 실현" 아크로 **inferred 시맨틱 엔티티 온톨로지를 완성**(DESIGN §6 유예 #3 완전 실현). 각 슬라이스: TDD + fresh-context reviewer 독립검증(테스트 재현) + ADR/DESIGN/CLAUDE 실현 반영 + 커밋.
+- `3f4ab66` **docs(knowledge)**: CommunityReport 적재 계약 ADR 초안(`ADR-20260702-communityreport-load-contract`).
+- `54c0b22` **docs(knowledge)**: Risk·DesignDecision 적재 계약 ADR 초안(`ADR-20260702-risk-designdecision-load-contract` — ADR-20260701을 1급 inferred 엔티티로 일반화).
+- `2b057f1` **feat(kg)**: CommunityReport 로더 — Community 대상 Summary에 **멤버십-grounding**(claim ref가 대상 community 멤버 Class로 resolve, 비멤버 entity-atomic 거부). `kg/summary.py` `_in_community`+`community:` 게이트.
+- `6b158e4` **feat(kg)**: Risk 로더 — 새 `Risk` 노드 + `RISKS`(inferred), `kg/risk.py`. namespace id `risk:<sha256>`, ≥1 flag grounded, entity-atomic.
+- `3090973` **feat(kg)**: DesignDecision 로더 — 새 `DesignDecision` 노드 + `DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK`(inferred), `kg/decision.py`. namespace id `decision:<sha256>`, ≥1 DECIDES grounded, 엔티티-간 엣지 **라벨체크**(SUPERSEDES→DesignDecision·ADDRESSES_RISK→Risk), entity-atomic.
 
-## 3. 이 세션 운영 교훈 (다음 세션 참고)
-- **provider-free가 방향타**: 유예 항목마다 "판정/생성은 밖, palimpsest는 ingest/detect만". Community도 구조(deterministic native)와 prose(inferred 외부)를 갈라 구조만 실현했다.
-- **autopilot coverage sweep의 `--relevance` 자동 축소가 이 repo에서 안 먹음**: seed 후 각 카테고리를 `coverage-round`로 수동 close 해야 함(skip=out_of_scope+reason+residual_risk, relevant=resolved+`axis_signals.neutrality{opponent_ran,verdict}`). resolved close는 자식이 모두 dry여야 함.
-- **autopilot judging 노드(verify/review/docs) evidence 결박**: `outcome=pass` 시 `ac_verdicts`의 pass verdict가 `evidence_refs`(object `{kind,command/path,summary}`)를 carry하지 않으면 G7이 non-contentful로 override하고, `complete`가 AC를 unverified로 남긴다. 병렬 verify∥review는 서로 커버 안 되니 둘 다 evidence 필요. 노드가 이미 passed면 `autopilot.json`의 `status`를 pending으로 바꿔 re-arm 후 재record(CLI에 reopen 없음).
-- 검증은 fresh-context verifier 서브에이전트로(§4-9).
+공통 규약(전 inferred 층): 전용 로더(generic deterministic ingest 재사용 금지 — 세탁 방지), `edge_kind='inferred'`, MERGE-on-id 멱등, namespace 격리 id, provenance+`code_bound_at`(대상 코드 committed_at), inferred 엣지는 recall `DEFAULT_RELATIONS`·`REL_TYPES`에서 제외(items 누출 없음). 테스트 47→88 passed.
 
-## 4. 금지 (scope creep)
-- EcoleTreeSystems git 작업 금지.
-- 완료분(#2·#4·#1·#3 Community·recall·load) 재구현 금지.
-- CommunityReport prose / Risk / DesignDecision을 **외부 생산자 계약 없이 노드타입만** 만들지 말 것(빈 선반). 판정/생성을 palimpsest 코드에 박지 말 것(provider-free).
-- code = SoT: `src/palimpsest/`가 권위. DESIGN/ADR은 계획·결정 기록.
+## 3. 남은 작업 (완주까지) — DESIGN §6/§7 기준
+**A. palimpsest 완주 가능(fixture로 hermetic 검증):**
+- **설계위험 감지 (slice 2)** — DESIGN §6 다음 슬라이스, 원래 v1 후보. 이제 `Risk` 노드를 소비할 수 있다(구조적 결합 회상 위 위험 표시). **설계 무거움 → heavy path(`/ditto:deep-interview` → pre-mortem → autopilot) 권장.** 위험 *판정*은 외부(Risk 생산자), 구조적 감지·표시는 palimpsest.
+- **신선도 2축** `valid_from`/`valid_to`(결정-계보, bi-temporal) · **벤치마크**(§7 성능 미측정) · **push/페르소나 회상** · **backfill**(전 git 이력) · **Reconcile**(브랜치 간 신선도) · **cross-repo** · **agent-trace 캡처**.
+- **inferred 회상 전용 채널**(`recall_risk`/`recall_decision` 또는 'inferred' 채널) — 현재 Risk/DesignDecision는 순회 제외만 됨(전용 진입점 없음).
 
-## 5. 새 세션 첫 확인
-1. `git fetch origin && git checkout feat/community-node-wi2607010n6` → tip이 `a512683`인지. (main 병합 여부 사용자와 확인.)
-2. `open -a Docker` 후 `DITTO_AUTOPILOT_BYPASS=1 .venv/bin/python -m pytest -q` → 55 passed.
-3. 다음 작업(CommunityReport prose / Risk / DesignDecision)은 **외부 생산자 계약이 선결** — 계약 유무를 사용자와 확정 후 착수.
+**B. 외부 생산자 필요(provider-free — 로더는 실현, 실데이터만 밖):** 요약/report/risk/decision **실생성**, 내용(semantic) 검증 판정 하네스.
+
+**C. 사용자만 결정(내가 못 정함):** **노출 형태**(MCP/스킬/pluggable 택일) · **임베딩 설계**(부착대상/차원/하이브리드) · **provider-free 완화 여부**(현재 hard invariant). C는 닿는 슬라이스에서 확인.
+
+## 4. 알려진 잔여 갭 (전부 low, 해당 ADR change_condition에 기록됨)
+- **multi-flag/target `code_bound_at`**: Risk/DesignDecision가 여러 code 대상을 flag/decide할 때 노드+모든 엣지가 `sorted(...)[0]` 대상의 committed_at에 결박(각 엣지 자기 대상 아님). 단일 대상(테스트 커버)엔 정확. 회상 채널+multi 생산자 붙으면 엣지별 대상 결박으로 정련.
+- **same-batch 엔티티 resolution**: DesignDecision의 SUPERSEDES/ADDRESSES_RISK 대상이 같은 배치에서 방금 적재된 엔티티면 미해소(현재 기존 그래프만). 두-pass 로더로 정련 가능.
+- **DECIDES-only-decision `code_bound_at`=None**(코드 대상 없는 결정, untested edge) · **CommunityReport orphan**(멤버십 변경 시 옛 report가 recall stale로 안 잡힘) · **중첩 클래스 grounding**(CommunityReport, 계약 허용 범위).
+
+## 5. 운영 교훈 (이 세션 검증 흐름 — 다음 세션 재사용)
+- **슬라이스 = lightweight work item + TDD**로 몰았다. 큰 구현은 **implementer 서브에이전트에 위임**(코드+테스트만, ADR/DESIGN은 coordinator가), 이후 **fresh-context reviewer가 독립 검증**(코드 정독 + 테스트 재현 + 계약 대조). 서브에이전트 "성공" 보고는 증거 아님 — reviewer의 재현 테스트·diff가 증거.
+- **reviewer ledger 정정**: reviewer가 `reviewer-output.json` + `ditto acg-review`로 verdict를 남긴다. finding 수정 후 같은 reviewer에게 SendMessage로 재확인 + ledger(findings=[]) 갱신 요청.
+- **ac 증거 결박**: `ditto verify <wi> --criterion <ac> -- <cmd>` (테스트/grep). 4 AC 모두 pass여야 `ditto work done`(final_verdict=pass) 통과.
+- **반복된 drift blind-spot**: ADR을 proposed→active로 승격할 때 **상단 관계(관계) bullet과 흩어진 DESIGN §2/§2-bis 마커를 자주 놓친다.** 실현 반영 후 반드시 `grep -n "유예\|proposed\|🔶\|계약 초안"`로 전수 감사할 것.
+- `ditto knowledge adr-check`는 파일명/id 정합성만 검사(내용 아님).
+
+## 6. 금지 (scope creep)
+- EcoleTreeSystems git 작업 금지. 완료분(3 계약·3 로더) 재구현 금지.
+- provider-free 위반 금지 — 판정/생성을 palimpsest 코드에 박지 말 것.
+- code = SoT: `src/palimpsest/`가 권위. DESIGN §6 = 계획, ADR = 결정.
+
+## 7. 새 세션 첫 확인
+1. `git status` → 브랜치 `feat/community-node-wi2607010n6`, tip `3090973`, 9 ahead of main, clean.
+2. `open -a Docker` 후 `~/.pyenv/shims/python -m pip install -e ".[test]"` → `DITTO_AUTOPILOT_BYPASS=1 ~/.pyenv/shims/python -m pytest -q` → **88 passed**.
+3. 다음 작업 = **DESIGN §6 slice 2 '설계위험 감지'**(heavy path 권장) 또는 사용자가 지정하는 다른 완주-가능 슬라이스. C 결정이 필요한 슬라이스(노출/임베딩)는 사용자 확인 선결.
+4. (선택) 오래된 draft work item `wi_260626v8v`(docs/DESIGN 위치이동으로 대체)·`wi_2606264gw`(DB 스파이크 ADR로 대체)는 superseded — `ditto work abandon` 정리 후보.
