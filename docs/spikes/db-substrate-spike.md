@@ -98,13 +98,13 @@
 
 **주의: 이것은 §4의 3-DB 비교가 아니다.** as-built 파이프라인(Neo4j 5 Community, 벡터층 없음 — 임베딩은 유예된 C-결정)을 실제 코퍼스로 실측한 단일 substrate 값이다. Memgraph·Postgres 대조·벡터 recall은 미측정. 하네스·원자료: `bench/benchmark.py` → `bench/results/asbuilt-neo4j.json`(재현: `.venv/bin/python bench/benchmark.py --repo <repo> --total-commits <N>`).
 
-- **코퍼스/방법:** EcoleTreeSystems 최근 45커밋 윈도(전체 425). 최근 커밋은 그래프가 ~HEAD 크기라 **최악(가장 느린) ingest 레이트**를 잡는 보수적 측정. 전체 이력 절대시간은 wall-clock이 아니라 rate 외삽.
-- **Ingest:** 0.073 commits/sec (~13.7s/커밋), HEAD 1439 nodes / 8146 edges. 전체 425 외삽 ≥ **~97분**(하한 — 아래 finding대로 superlinear).
-- **회상 순회 지연:** depth1 p50 24ms / p95 47ms, depth2 p50 35ms / p95 59ms (30 seed × 5 iter). 읽기 경로는 빠르다.
-- **전체 재구축:** teardown(DETACH DELETE) 0.24s + backfill 563s(45커밋). 빈 DB backfill과 사실상 동일 비용(MERGE 멱등).
-- **피크 RAM:** Neo4j 컨테이너 946 MiB.
+- **코퍼스/방법:** EcoleTreeSystems 최근 45커밋 윈도(전체 425). 최근 커밋은 그래프가 ~HEAD 크기라 **최악(가장 느린) ingest 레이트**를 잡는 보수적 측정. 전체 이력 절대시간은 wall-clock이 아니라 rate 외삽. 수치는 아래 Finding의 인덱스 수정(wi_2607022ge) 반영 후 값이다.
+- **Ingest:** 0.691 commits/sec (~1.4s/커밋), HEAD 1439 nodes / 8146 edges. 전체 425 외삽 **~10분**.
+- **회상 순회 지연:** depth1 p50 23ms / p95 48ms, depth2 p50 36ms / p95 59ms (30 seed × 5 iter). 읽기 경로는 빠르다(수정 전후 불변 — 아래 Finding과 무관).
+- **전체 재구축:** teardown(DETACH DELETE) 0.32s + backfill 60s(45커밋). 빈 DB backfill과 사실상 동일 비용(MERGE 멱등).
+- **피크 RAM:** Neo4j 컨테이너 823 MiB.
 
-**Finding — ingest가 superlinear로 느린 이유(증거 기반):** `kg/ingest.py`의 관계 MERGE가 끝점을 무라벨 `MATCH (a {id: row.src})`로 찾는다. 전역(무라벨) id 인덱스가 없어(`SHOW INDEXES`: 라벨별 RANGE 인덱스만 존재) 플래너가 인덱스를 못 쓰고 **전체 노드 스캔**으로 떨어진다. 커밋마다 ~8000엣지 × 2 끝점 스캔이고 그래프가 커질수록 스캔 비용이 커져 backfill이 커밋 수에 대해 초선형이 된다(초반 ~5s/커밋 → 그래프 성장 후 ~13s/커밋 관측). **회상(읽기)은 라벨 있는 seed 조회라 이 문제에서 자유롭다.** 최적화(예: 전역 id 인덱스 또는 끝점 MATCH에 라벨 부여)는 별도 work item 후보 — 이 벤치의 범위 밖.
+**Finding(식별 후 수정됨, wi_2607022ge) — ingest 관계 MERGE의 끝점 조회 인덱스화:** 최초 측정 시 `kg/ingest.py`의 관계 MERGE가 끝점을 무라벨 `MATCH (a {id: row.src})`로 찾았다. Neo4j 5는 무라벨 속성 인덱스가 없어(`SHOW INDEXES`: 라벨별 RANGE만) 플래너가 **전체 노드 스캔**(`AllNodesScan`)으로 떨어졌고, 커밋마다 ~8000엣지 × 2 끝점 스캔 × 그래프 성장 → backfill이 초선형(~13s/커밋)이었다. 수정: 끝점 MATCH에 IR 노드맵으로 **라벨을 부여**(`MATCH (a:`Method` {id})`)해 `NodeUniqueIndexSeek`로 전환. 동일 45커밋 윈도에서 **ingest 0.073 → 0.691 commits/sec(~9.5×)**, backfill 563s → 60s. **동작 동등**(HEAD 그래프 1439/8146 동일, 전체 스위트 119 passed). before/after 원자료: `bench/results/asbuilt-neo4j.json`(수정 전) / `asbuilt-neo4j-after-indexfix.json`(수정 후). **회상(읽기)은 라벨 있는 seed 조회라 처음부터 이 문제와 무관.**
 
 ## 5. 출처 (Sources)
 

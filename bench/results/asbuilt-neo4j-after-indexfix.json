@@ -1,0 +1,44 @@
+{
+  "corpus": "/private/tmp/claude-501/-Users-incognito-dev-projects-palimpsest/ce033089-95e4-4608-a39b-55a6c70709e2/scratchpad/corpus-win",
+  "substrate": "neo4j:5-community",
+  "note": "as-built single-substrate actuals; no vector layer. Measured on a recent-commit window (near-HEAD graph = worst-case ingest rate); full-history figures are rate-extrapolated, not wall-clock.",
+  "full_history_commits": 425,
+  "ingest": {
+    "commits": 45,
+    "head_nodes": 1439,
+    "head_edges": 8146,
+    "wall_sec": 65.136,
+    "commits_per_sec": 0.691
+  },
+  "recall": {
+    "seeds": 30,
+    "iters_per_seed": 5,
+    "depth1": {
+      "samples": 150,
+      "p50_ms": 23.136,
+      "p95_ms": 47.718,
+      "max_ms": 532.097
+    },
+    "depth2": {
+      "samples": 150,
+      "p50_ms": 35.532,
+      "p95_ms": 58.971,
+      "max_ms": 72.176
+    }
+  },
+  "rebuild": {
+    "teardown_sec": 0.316,
+    "backfill_sec": 60.261,
+    "commits": 45
+  },
+  "extrapolated_full_history": {
+    "commits": 425,
+    "window_commits_per_sec": 0.691,
+    "est_ingest_sec": 615.2,
+    "caveat": "linear extrapolation of a superlinear cost (ingest slows as the graph grows — see finding); true full-history time is >= this."
+  },
+  "peak_ram": {
+    "neo4j_container_mib": 822.8,
+    "samples": 69
+  }
+}
