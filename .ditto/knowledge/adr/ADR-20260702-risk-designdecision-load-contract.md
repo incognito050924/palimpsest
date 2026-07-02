@@ -34,7 +34,7 @@ Risk·DesignDecision 적재 계약을 다음으로 결정한다. `ADR-20260701`�
 
 7. **회상 노출 — 분리 채널·순회 격리.** Risk/DesignDecision는 items 순회로 누출되지 않게 `DECIDES`/`RISKS`/`SUPERSEDES`/`ADDRESSES_RISK`를 traversal 화이트리스트(`DEFAULT_RELATIONS`)에서 제외하고, Summary의 'summaries'처럼 **분리 채널**로 노출한다. **전용 진입점 forward 실현**(wi_260702tad): `recall_risk`/`recall_decision` — 엔티티 id로 그 엔티티가 가리키는 grounded 대상(RISKS flag 코드 / DECIDES·SUPERSEDES·ADDRESSES_RISK 대상)을 `recall_community` 미러로 반환(bounded·gap·provider-free). **역방향·채널 통합 실현**(wi_260702qe3, 설계위험 감지 slice 2): main `recall`/`recall_community`/`expand` 결과가 회상된 코드에 결박된 Risk/DesignDecision를 별도 `risks`/`decisions` 채널로 표시(역방향 조회, 'summaries' 채널 미러, items 누출 없음).
 
-8. **구현 상태 — 로더 + 회상(전용 진입점 + 역방향 채널) 실현.** **Risk**: IR `Risk`/`RISKS` + `kg/risk.py`(wi_2607021h0). **DesignDecision**: IR `DesignDecision`/`DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK`(엔티티-간 엣지 라벨체크 포함) + `kg/decision.py`(wi_260702b48). **회상**: forward 진입점 `recall_risk`/`recall_decision`(wi_260702tad) + 역방향 `risks`/`decisions` 채널 in `recall`/`recall_community`/`expand`(wi_260702qe3) — 모두 `recall/graphrag.py`. 모두 fixture 검증(아래 실현 절). 남은 유예: 외부 payload 생산(provider-free상 밖)·same-batch 엔티티 resolution·추가 inferred 엣지(CAUSALLY_RELATES 등).
+8. **구현 상태 — 로더 + 회상(전용 진입점 + 역방향 채널) 실현.** **Risk**: IR `Risk`/`RISKS` + `kg/risk.py`(wi_2607021h0). **DesignDecision**: IR `DesignDecision`/`DECIDES`/`SUPERSEDES`/`ADDRESSES_RISK`(엔티티-간 엣지 라벨체크 포함) + `kg/decision.py`(wi_260702b48). **회상**: forward 진입점 `recall_risk`/`recall_decision`(wi_260702tad) + 역방향 `risks`/`decisions` 채널 in `recall`/`recall_community`/`expand`(wi_260702qe3) — 모두 `recall/graphrag.py`. 모두 fixture 검증(아래 실현 절). **추가 inferred 엣지(CAUSALLY_RELATES/RELATES_TO/CONFLICTS_WITH) 일반 관계 로더+회상도 실현**(wi_260702rnu — 아래 실현 절). 남은 유예: 외부 payload 생산(provider-free상 밖)·same-batch 엔티티 resolution.
 
 ## 실현·검증된 사항 (code = SoT, 동작은 코드가 권위 — 여기 prose로 이중화하지 않음)
 
@@ -63,6 +63,14 @@ Risk·DesignDecision 적재 계약을 다음으로 결정한다. `ADR-20260701`�
 - 테스트: `tests/recall/test_recall_design_risk.py`(risk/decision 채널 표면화·items 미누출·bounded·recall_community 멤버 위험/결정). 전체 98 passed. fresh-context 독립 리뷰 PASS(behavior-risk finding 0).
 - 알려진 범위[low]: 채널 `limit`는 (entity,ref) row 단위 bound(summaries 선례); `decisions` 채널의 refs는 decision→decision DECIDES 대상(코드 span 없음)도 포함(grounding 문맥, 신선도 앵커는 코드 대상만); recall_community의 'summaries'(CommunityReport) 표면화는 별도 ADR 유예.
 
+**추가 inferred 엣지 — 순수 관계 로더+회상(2026-07-02, wi_260702rnu):**
+- IR: `CAUSALLY_RELATES`/`RELATES_TO`/`CONFLICTS_WITH` 상수 + `INFERRED_RELATION_TYPES`(닫힌 집합) + frozen `InferredRelation`(source_id/target_id/rel_type/provenance/confidence?/semantic_verdict?) in `src/palimpsest/ir.py`.
+- 로더 `src/palimpsest/kg/relation.py`: `load_relations` — 구조 거부(generator/model/rel_type∈닫힌집합) → 양 endpoint 선-resolve(미해소 entity-atomic 거부) → `_RELATION_MERGE`(rel은 닫힌 상수 templating·injection-inert, id는 `$param`; `edge_kind='inferred'`, MERGE-on-(a,rel,b) 멱등). `code_bound_at`=source committed_at. **새 노드 없음**(순수 엣지).
+- 층 분리: 세 rel은 `REL_TYPES`·`DEFAULT_RELATIONS` 모두 제외 → items 순회 누출 없음(명시 요청도 필터).
+- 회상 `src/palimpsest/recall/graphrag.py`: `relations` 채널(8→9키) — 회상된 노드에 걸린 세 rel 엣지를 역방향 조회(`WITH DISTINCT e` 중복 제거, rel_type·양 endpoint·edge_kind·provenance·semantic_verdict). `recall`/`recall_community`/`expand` 배선.
+- 테스트: `tests/kg/test_relation.py`(적재·닫힌집합 거부·entity-atomic·멱등·순회 제외) + `tests/recall/test_recall_design_risk.py`(채널 surface·recall_community·provenance round-trip). 전체 113 passed, provider-free probe 유지. fresh-context 독립 리뷰 PASS(behavior-risk finding 0).
+- 알려진 범위[low]: self-loop 허용·symmetric 관계 directed 저장·source-anchor 신선도(위 change_condition).
+
 ## 근거 (rationale)
 
 - **일반화, 무-중복**: `ADR-20260701`의 4중 계약(provider-free·grounding·inferred 분리·provenance)과 Summary 로더 선례(전용 로더·namespace id·atomic 거부·code_bound_at 결박)를 그대로 재사용한다. Risk와 DesignDecision를 한 ADR로 묶는 이유: 적재 계약 골격이 동일하고 엔티티별 차이는 **엣지 집합뿐**이다. 계약은 하나의 결정(1급 inferred 엔티티 적재 패턴)이고 두 엔티티는 그 인스턴스다.
@@ -80,7 +88,7 @@ Risk·DesignDecision 적재 계약을 다음으로 결정한다. `ADR-20260701`�
 - **id 원료 확정** — 멱등 rebuild용 안정 id 원료(정규화 title+source_commit 등). 로더 구현 시 확정.
 - **외부 생산자 파이프라인** — Risk/DesignDecision 판정·생성(LLM/분석). palimpsest 밖(provider-free).
 - **DesignDecision 결정론 분리** — 대상 코퍼스에 *구조화된* 결정 기록(ADR류 파일)이 있으면 DesignDecision *노드*는 결정론 추출 가능(그 노드는 deterministic 층), 단 `DECIDES` *엣지*는 여전히 inferred(Community의 detection/report 분리 선례). 현재 대상엔 그런 기록이 없어 노드·엣지 모두 inferred로 둔다(change_condition).
-- **추가 inferred 엣지** — `DESIGN.md` §2-bis의 `CAUSALLY_RELATES`/`RELATES_TO`·`CONFLICTS_WITH` 등. 필요해지면 이 계약을 확장.
+- **추가 inferred 엣지 — 실현**(wi_260702rnu): `CAUSALLY_RELATES`/`RELATES_TO`/`CONFLICTS_WITH`를 **1급 노드 없는 순수 inferred 엣지**로 일반화한 전용 로더 `kg/relation.py`(`load_relations`) + 회상 'relations' 채널. 같은 계약 골격(provider-free·양 endpoint grounding·entity-atomic 거부·`edge_kind='inferred'`·MERGE 멱등·닫힌 rel_type)을 엣지-only로 적용. self-loop·symmetric 방향성(CONFLICTS_WITH/RELATES_TO를 directed 저장)은 생성자 책임(아래 change_condition).
 - **provider-free 완화 여부** — 범위 밖(별도 결정, ADR-20260701 입장 유지: hard invariant).
 
 ## 철회·변경 조건 (change_condition)
@@ -91,5 +99,5 @@ Risk·DesignDecision 적재 계약을 다음으로 결정한다. `ADR-20260701`�
 - **same-batch resolution 재검토**: 엔티티-간 엣지(SUPERSEDES/ADDRESSES_RISK)의 same-batch 대상 지원이 실사용에서 필요하면 두-pass 로더로 정련.
 - **multi-flag 신선도 재검토**: Risk `code_bound_at`이 multi-flag에서 `sorted(flags)[0]` 기준이라 다른 flag 대상의 stale 판정이 부정확할 수 있다 — multi-flag Risk가 실사용에서 흔해지면 엣지별 대상 committed_at 결박으로 정련.
 - **DesignDecision 결정론화**: 대상 코퍼스에 구조화된 결정 기록이 나타나면 DesignDecision 노드의 결정론 추출을 재검토한다(Community 선례, DECIDES 엣지는 inferred 유지).
-- **엣지 집합 재검토**: `CAUSALLY_RELATES`/`RELATES_TO`/`CONFLICTS_WITH` 등 추가 inferred 관계가 필요해지면 계약을 확장한다.
+- **엣지 집합 확장 충족**(2026-07-02, wi_260702rnu): `CAUSALLY_RELATES`/`RELATES_TO`/`CONFLICTS_WITH`를 순수 inferred 엣지 로더(`kg/relation.py`)+회상 'relations' 채널로 실현(113 passed). 남은 재검토: self-loop 허용 여부·symmetric 관계의 directed 저장(현재 생성자 책임)·per-endpoint 신선도(현재 source committed_at 앵커). 추가 관계 타입이 더 필요해지면 `INFERRED_RELATION_TYPES` 닫힌 집합을 확장한다.
 - **엔티티 분리 재검토**: Risk와 DesignDecision의 적재 규약이 실사용에서 유의하게 갈리면 ADR을 둘로 분리한다(현재는 골격 공유라 하나).
