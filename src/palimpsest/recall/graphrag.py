@@ -50,6 +50,10 @@ from palimpsest.ir import CALLS, DEPENDS_ON, CONTAINS, IMPORTS, MEMBER_OF
 # The relations recall may traverse (the deterministic structural ontology).
 DEFAULT_RELATIONS = (CALLS, DEPENDS_ON, CONTAINS, IMPORTS)
 
+# Namespace prefix of a DesignDecision id (mirrors kg/decision.py): a DECIDES target
+# with this prefix is another decision, not code, so it carries no code committed_at.
+_DECISION_NS = "decision:"
+
 # Ontology node labels, in the order we pick a node's primary kind.
 _NODE_LABELS = ("Repo", "Package", "File", "Class", "Method", "Episode", "Community")
 
@@ -233,6 +237,117 @@ def _summaries(driver, items, limit) -> list:
     return _summary_channel(rows)
 
 
+# The inferred design-risk channels (slice 2 "위험 표시"), each a SEPARATE channel
+# mirroring 'summaries'. For the recalled node ids (already depth/limit bounded),
+# pull each Risk that FLAGS one of them / DesignDecision that DECIDES one of them,
+# plus the code spans it grounds to. Bounded by construction. One row per
+# (entity, grounded ref); ``edge_kind`` rides in as the inferred marker. RISKS /
+# DECIDES are never traversable relations, so a Risk / DesignDecision can never
+# leak into items — it surfaces solely through these channels.
+_RISKS_CHANNEL = """
+UNWIND $ids AS anchor_id
+MATCH (r:Risk)-[:RISKS]->({id: anchor_id})
+WITH DISTINCT r
+MATCH (r)-[e:RISKS]->(g)
+RETURN r.id AS id, r.title AS title, r.flags AS anchors,
+       r.code_bound_at AS code_bound_at, r.semantic_verdict AS semantic_verdict,
+       r.confidence AS confidence, e.edge_kind AS edge_kind,
+       g.id AS ref_id, g.source_commit AS source_commit, g.path AS path,
+       g.start_line AS start_line, g.end_line AS end_line,
+       g.committed_at AS committed_at
+ORDER BY id, ref_id
+LIMIT $lim
+"""
+
+_DECISIONS_CHANNEL = """
+UNWIND $ids AS anchor_id
+MATCH (d:DesignDecision)-[:DECIDES]->({id: anchor_id})
+WITH DISTINCT d
+MATCH (d)-[e:DECIDES]->(g)
+RETURN d.id AS id, d.title AS title, d.decides AS anchors,
+       d.code_bound_at AS code_bound_at, d.semantic_verdict AS semantic_verdict,
+       d.confidence AS confidence, e.edge_kind AS edge_kind,
+       g.id AS ref_id, g.source_commit AS source_commit, g.path AS path,
+       g.start_line AS start_line, g.end_line AS end_line,
+       g.committed_at AS committed_at
+ORDER BY id, ref_id
+LIMIT $lim
+"""
+
+
+def _bound_anchor(anchors) -> str | None:
+    """The code target whose ``committed_at`` a Risk/Decision's ``code_bound_at``
+    was bound to at load — the freshness anchor. Mirrors the loaders: Risk binds
+    to ``sorted(flags)[0]``; a decision binds to its first *code* DECIDES target
+    (``decision:``-namespaced targets are other decisions, not code, so skipped).
+    ``anchors`` arrives already sorted (the loaders sort before storing)."""
+    for a in (anchors or []):
+        if not a.startswith(_DECISION_NS):
+            return a
+    return None
+
+
+def _entity_channel(rows) -> list:
+    """Group flat (entity, grounded-ref) rows into an inferred design-risk channel:
+    one entry per Risk/DesignDecision, each with its grounding refs (author-omitted),
+    the inferred ``edge_kind`` marker, the bound commit (``code_bound_at``), the
+    external judge's ``semantic_verdict`` (parsed), and the ``stale`` freshness flag
+    (set from the freshness-anchor ref, mirroring the summaries channel). The title
+    stays here — never merged into items."""
+    by_id: dict = {}
+    for row in rows:
+        entry = by_id.get(row["id"])
+        if entry is None:
+            entry = {
+                "id": row["id"],
+                "title": row["title"],
+                "edge_kind": row["edge_kind"],        # inferred marker, from the edge
+                "code_bound_at": row["code_bound_at"],  # bound commit (freshness)
+                "confidence": row["confidence"],
+                # External judge's verdict (annotate-only), parsed from stored JSON;
+                # absent -> None. palimpsest never judges — it only surfaces this.
+                "semantic_verdict": (
+                    json.loads(row["semantic_verdict"])
+                    if row.get("semantic_verdict")
+                    else None
+                ),
+                "refs": [],
+                "stale": False,
+                "_anchor": _bound_anchor(row.get("anchors")),
+            }
+            by_id[row["id"]] = entry
+        entry["refs"].append({"id": row["ref_id"], **_sources(row)})
+        # Freshness follows the bound anchor's current committed_at (see loaders).
+        if row["ref_id"] == entry["_anchor"]:
+            entry["stale"] = _stale(entry["code_bound_at"], row["committed_at"])
+    out = list(by_id.values())
+    for entry in out:
+        entry.pop("_anchor", None)
+    return out
+
+
+def _risks(driver, items, limit) -> list:
+    """The inferred Risk channel for the recalled ``items`` (already bounded).
+
+    ``limit`` is a server-side row bound (Cypher ``LIMIT`` after ORDER BY)."""
+    if not items:
+        return []
+    ids = [it["id"] for it in items]
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_RISKS_CHANNEL, ids=ids, lim=limit)]
+    return _entity_channel(rows)
+
+
+def _decisions(driver, items, limit) -> list:
+    """The inferred DesignDecision channel for the recalled ``items`` (bounded)."""
+    if not items:
+        return []
+    ids = [it["id"] for it in items]
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_DECISIONS_CHANNEL, ids=ids, lim=limit)]
+    return _entity_channel(rows)
+
+
 def _seed_relation_gaps(driver, query, relations):
     """For explicitly requested relations only: any that have no edge on the
     seed is an honest gap (a confident empty answer would be dishonest)."""
@@ -271,13 +386,18 @@ def _hop(driver, frontier, visited, relations, depth, budget):
     return items, emitted, truncated
 
 
-def _result(items, gaps, handle, summaries):
+def _result(items, gaps, handle, summaries, risks=None, decisions=None):
     return {
         "items": items,
         # Separate grounding channel (id-keyed), mirrors items — never merged.
         "sources": [{"id": it["id"], **it["sources"]} for it in items],
         # Separate inferred-summary channel — never merged into items.
         "summaries": summaries,
+        # Separate inferred design-risk channels (slice 2 "위험 표시") — the Risks
+        # flagging / DesignDecisions deciding the recalled code, never merged into
+        # items. Empty for entry points that do not run the detection flow.
+        "risks": risks or [],
+        "decisions": decisions or [],
         "gaps": gaps,
         "confidence": _confidence(items),
         "expand_handle": handle,
@@ -347,7 +467,12 @@ def recall(driver, query, depth=1, limit=25, relations=None):
         handle = None
 
     gaps = _seed_relation_gaps(driver, query, relations) if explicit_relations else []
-    return _result(items, gaps, handle, _summaries(driver, items, limit))
+    return _result(
+        items, gaps, handle,
+        _summaries(driver, items, limit),
+        _risks(driver, items, limit),
+        _decisions(driver, items, limit),
+    )
 
 
 def _neighbors_beyond(driver, frontier, visited, relations) -> bool:
@@ -393,7 +518,15 @@ def recall_community(driver, community_id, limit=25):
             return _result([], [gap], None, [])
         rows = [r.data() for r in session.run(_COMMUNITY_MEMBERS, id=community_id, lim=limit)]
     items = [_item(rec, MEMBER_OF, 1) for rec in rows]
-    return _result(items, [], None, [])
+    # 구조적 결합(community) 위에 위험/결정 표시 (slice 2): member classes' attached
+    # Risks/DesignDecisions surface in their channels. The 'summaries' channel stays
+    # empty here — surfacing a community's CommunityReport via recall_community is a
+    # separate deferral owned by ADR-20260702-communityreport-load-contract, not this.
+    return _result(
+        items, [], None, [],
+        _risks(driver, items, limit),
+        _decisions(driver, items, limit),
+    )
 
 
 # The inferred entities (Risk / DesignDecision), as SEPARATE entry points — the
@@ -503,4 +636,9 @@ def expand(driver, handle, limit=25):
     else:
         next_handle = None
 
-    return _result(new_items, [], next_handle, _summaries(driver, new_items, limit))
+    return _result(
+        new_items, [], next_handle,
+        _summaries(driver, new_items, limit),
+        _risks(driver, new_items, limit),
+        _decisions(driver, new_items, limit),
+    )

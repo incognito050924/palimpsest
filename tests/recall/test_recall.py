@@ -98,7 +98,8 @@ def test_recall_unresolved_seed_reports_gap_not_confident_empty(recall_db):
     assert out["gaps"] and any("did not resolve" in g for g in out["gaps"])
     assert out["confidence"] == 0.0
     assert set(out) == {
-        "items", "sources", "summaries", "gaps", "confidence", "expand_handle",
+        "items", "sources", "summaries", "risks", "decisions",
+        "gaps", "confidence", "expand_handle",
     }
 
 
@@ -146,7 +147,8 @@ def test_recall_path_imports_no_generative_module_and_keeps_fields_separate(reca
     # (b) Structural: separated fields, no laundered prose field.
     out = recall(recall_db, CTRL_METHOD, depth=1, limit=25)
     assert set(out) == {
-        "items", "sources", "summaries", "gaps", "confidence", "expand_handle",
+        "items", "sources", "summaries", "risks", "decisions",
+        "gaps", "confidence", "expand_handle",
     }
     for laundered in ("answer", "summary", "text", "response", "narrative"):
         assert laundered not in out

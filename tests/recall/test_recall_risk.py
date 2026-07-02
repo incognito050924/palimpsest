@@ -21,7 +21,7 @@ CTRL = "kr.co.ecoletree.service.commute.controller.CommuteController"
 SVC = "kr.co.ecoletree.service.commute.service.CommuteService"
 RISK_COMMIT = "c20b7332d8c60ce73794427a4c28120b085c134d"  # matches conftest PROV
 
-RESULT_KEYS = {"items", "sources", "summaries", "gaps", "confidence", "expand_handle"}
+RESULT_KEYS = {"items", "sources", "summaries", "risks", "decisions", "gaps", "confidence", "expand_handle"}
 
 
 @pytest.fixture
