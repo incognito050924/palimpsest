@@ -54,6 +54,16 @@ SUMMARIZES = "SUMMARIZES"    # edge type
 RISK = "Risk"                # node label
 RISKS = "RISKS"              # edge type
 
+# Inferred semantic layer (first-class decision entity): an externally-generated
+# DesignDecision — "this is a design decision" with its own identity. It DECIDES
+# code node(s) or other decisions, SUPERSEDES other decisions, and ADDRESSES_RISK
+# Risk nodes. Like Risk, produced elsewhere and handed in for grounded load;
+# palimpsest never judges.
+DESIGN_DECISION = "DesignDecision"    # node label
+DECIDES = "DECIDES"                   # edge type (DesignDecision -> code | DesignDecision)
+SUPERSEDES = "SUPERSEDES"            # edge type (DesignDecision -> DesignDecision)
+ADDRESSES_RISK = "ADDRESSES_RISK"    # edge type (DesignDecision -> Risk)
+
 # ``edge_kind`` marker — the schema-enforced no-laundering separation between the
 # deterministic structural layer and the inferred semantic layer. Both values are
 # colocated here so the two edge_kind constants live in one place.
@@ -290,6 +300,70 @@ class Risk:
         return cls(
             title=data["title"],
             flags=tuple(data.get("flags", ())),
+            generator=data["generator"],
+            model=data["model"],
+            source_commit=data["source_commit"],
+            created_at=data["created_at"],
+            confidence=data.get("confidence"),
+            semantic_verdict=data.get("semantic_verdict"),
+        )
+
+
+@dataclass(frozen=True)
+class DesignDecision:
+    """An externally-generated design decision over code and other entities.
+
+    palimpsest never calls an LLM: the decision ("this is a design decision") is
+    produced elsewhere and handed in for grounded, idempotent load. It carries
+    three inferred edge target sets: ``decides`` (the ``DECIDES`` targets — code
+    nodes or other decisions), ``supersedes`` (``SUPERSEDES`` targets — other
+    DesignDecisions), and ``addresses_risks`` (``ADDRESSES_RISK`` targets — Risk
+    nodes). Grounding: a decision must have >=1 ``DECIDES`` target and EVERY edge
+    target must resolve to a real graph node, else the loader rejects the whole
+    decision (entity-atomic) rather than launder a floating decision in.
+
+    Like :class:`Risk`/:class:`Summary`, ``code_bound_at`` is deliberately NOT a
+    field: freshness must follow the code, so the loader binds it to a decided
+    code node's ``committed_at``. ``author`` is likewise absent — the decision's
+    origin is attributed via ``generator``/``model``. ``created_at`` is the
+    external generation time.
+    """
+
+    title: str
+    decides: tuple[str, ...]
+    supersedes: tuple[str, ...]
+    addresses_risks: tuple[str, ...]
+    generator: str
+    model: str
+    source_commit: str
+    created_at: str
+    confidence: Optional[float] = None
+    # An EXTERNAL judge's semantic verdict, NOT the generator's self-report — kept
+    # on its own field, never overloading ``confidence`` (mirrors Risk/Summary).
+    # Absent -> None (unverified). palimpsest never produces this; it only ingests.
+    semantic_verdict: Optional[dict] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "title": self.title,
+            "decides": list(self.decides),
+            "supersedes": list(self.supersedes),
+            "addresses_risks": list(self.addresses_risks),
+            "generator": self.generator,
+            "model": self.model,
+            "source_commit": self.source_commit,
+            "created_at": self.created_at,
+            "confidence": self.confidence,
+            "semantic_verdict": self.semantic_verdict,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DesignDecision":
+        return cls(
+            title=data["title"],
+            decides=tuple(data.get("decides", ())),
+            supersedes=tuple(data.get("supersedes", ())),
+            addresses_risks=tuple(data.get("addresses_risks", ())),
             generator=data["generator"],
             model=data["model"],
             source_commit=data["source_commit"],

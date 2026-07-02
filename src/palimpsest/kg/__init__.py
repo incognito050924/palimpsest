@@ -10,6 +10,12 @@ from palimpsest.kg.community import (
     community_id,
     compute_communities,
 )
+from palimpsest.kg.decision import (
+    DesignDecisionLoadResult,
+    DesignDecisionRejection,
+    decision_id,
+    load_design_decisions,
+)
 from palimpsest.kg.ingest import create_constraints, ingest
 from palimpsest.kg.risk import (
     RiskLoadResult,
@@ -35,6 +41,10 @@ __all__ = [
     "risk_id",
     "RiskLoadResult",
     "RiskRejection",
+    "load_design_decisions",
+    "decision_id",
+    "DesignDecisionLoadResult",
+    "DesignDecisionRejection",
     "augment_communities",
     "community_id",
     "compute_communities",
