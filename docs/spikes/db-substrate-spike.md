@@ -98,13 +98,13 @@
 
 **주의: 이것은 §4의 3-DB 비교가 아니다.** as-built 파이프라인(Neo4j 5 Community, 벡터층 없음 — 임베딩은 유예된 C-결정)을 실제 코퍼스로 실측한 단일 substrate 값이다. Memgraph·Postgres 대조·벡터 recall은 미측정. 하네스·원자료: `bench/benchmark.py` → `bench/results/asbuilt-neo4j.json`(재현: `.venv/bin/python bench/benchmark.py --repo <repo> --total-commits <N>`).
 
-- **코퍼스/방법:** EcoleTreeSystems 최근 45커밋 윈도(전체 425). 최근 커밋은 그래프가 ~HEAD 크기라 **최악(가장 느린) ingest 레이트**를 잡는 보수적 측정. 전체 이력 절대시간은 wall-clock이 아니라 rate 외삽. 수치는 아래 Finding의 인덱스 수정(wi_2607022ge) 반영 후 값이다.
-- **Ingest:** 0.691 commits/sec (~1.4s/커밋), HEAD 1439 nodes / 8146 edges. 전체 425 외삽 **~10분**.
-- **회상 순회 지연:** depth1 p50 23ms / p95 48ms, depth2 p50 36ms / p95 59ms (30 seed × 5 iter). 읽기 경로는 빠르다(수정 전후 불변 — 아래 Finding과 무관).
-- **전체 재구축:** teardown(DETACH DELETE) 0.32s + backfill 60s(45커밋). 빈 DB backfill과 사실상 동일 비용(MERGE 멱등).
-- **피크 RAM:** Neo4j 컨테이너 823 MiB.
+- **코퍼스/방법:** EcoleTreeSystems **전체 425커밋 full-history wall-clock 실측**(윈도 외삽 아님). 인덱스 수정(아래 Finding, wi_2607022ge) 반영 후 코드로 빈 DB에서 전체 이력을 backfill한 실제 경과시간이다. 교차검증: 45커밋 near-HEAD 윈도(그래프 ~HEAD 크기 = 최악 ingest 레이트)의 외삽은 0.691 c/s → 615s였는데, 전체 실측은 0.708 c/s → 600s로 **그 보수적 상한 안에 들어왔다** — near-HEAD 윈도가 유효한 worst-case였고 이 코퍼스 규모에서 ingest 초선형 비용이 상한을 넘지 않았다. (JSON의 `extrapolated_full_history` 블록은 이 실행에선 window=full이라 est 600.1s ≈ 실측 600.1s로 축퇴됨.)
+- **Ingest:** 425커밋 **600s(~10분) wall-clock 실측**, 0.708 commits/sec (~1.4s/커밋), HEAD 1439 nodes / 8146 edges.
+- **회상 순회 지연:** depth1 p50 25ms / p95 56ms, depth2 p50 42ms / p95 74ms (30 seed × 5 iter). 읽기 경로는 빠르다(라벨 있는 seed 조회 — 아래 Finding과 무관).
+- **전체 재구축:** teardown(DETACH DELETE) 0.32s + backfill 534s(425커밋, ~8.9분). 빈 DB backfill과 사실상 동일 비용(MERGE 멱등).
+- **피크 RAM:** Neo4j 컨테이너 1106 MiB(전체 425 이력 backfill 중 피크).
 
-**Finding(식별 후 수정됨, wi_2607022ge) — ingest 관계 MERGE의 끝점 조회 인덱스화:** 최초 측정 시 `kg/ingest.py`의 관계 MERGE가 끝점을 무라벨 `MATCH (a {id: row.src})`로 찾았다. Neo4j 5는 무라벨 속성 인덱스가 없어(`SHOW INDEXES`: 라벨별 RANGE만) 플래너가 **전체 노드 스캔**(`AllNodesScan`)으로 떨어졌고, 커밋마다 ~8000엣지 × 2 끝점 스캔 × 그래프 성장 → backfill이 초선형(~13s/커밋)이었다. 수정: 끝점 MATCH에 IR 노드맵으로 **라벨을 부여**(`MATCH (a:`Method` {id})`)해 `NodeUniqueIndexSeek`로 전환. 동일 45커밋 윈도에서 **ingest 0.073 → 0.691 commits/sec(~9.5×)**, backfill 563s → 60s. **동작 동등**(HEAD 그래프 1439/8146 동일, 전체 스위트 119 passed). before/after 원자료: `bench/results/asbuilt-neo4j.json`(수정 전) / `asbuilt-neo4j-after-indexfix.json`(수정 후). **회상(읽기)은 라벨 있는 seed 조회라 처음부터 이 문제와 무관.**
+**Finding(식별 후 수정됨, wi_2607022ge) — ingest 관계 MERGE의 끝점 조회 인덱스화:** 최초 측정 시 `kg/ingest.py`의 관계 MERGE가 끝점을 무라벨 `MATCH (a {id: row.src})`로 찾았다. Neo4j 5는 무라벨 속성 인덱스가 없어(`SHOW INDEXES`: 라벨별 RANGE만) 플래너가 **전체 노드 스캔**(`AllNodesScan`)으로 떨어졌고, 커밋마다 ~8000엣지 × 2 끝점 스캔 × 그래프 성장 → backfill이 초선형(~13s/커밋)이었다. 수정: 끝점 MATCH에 IR 노드맵으로 **라벨을 부여**(`MATCH (a:`Method` {id})`)해 `NodeUniqueIndexSeek`로 전환. 동일 45커밋 윈도에서 **ingest 0.073 → 0.691 commits/sec(~9.5×)**, backfill 563s → 60s. **동작 동등**(HEAD 그래프 1439/8146 동일, 전체 스위트 119 passed). before/after 원자료: `bench/results/asbuilt-neo4j-before-indexfix.json`(수정 전) / `asbuilt-neo4j-after-indexfix.json`(수정 후) — 둘 다 동일 45커밋 윈도. 현 `bench/results/asbuilt-neo4j.json`은 수정 후 **전체 425커밋 full-history 실측**이다. **회상(읽기)은 라벨 있는 seed 조회라 처음부터 이 문제와 무관.**
 
 ## 5. 출처 (Sources)
 

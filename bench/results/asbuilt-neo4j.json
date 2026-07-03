@@ -1,0 +1,44 @@
+{
+  "corpus": "/Users/incognito/dev/projects/java/workspace/EcoleTreeSystems",
+  "substrate": "neo4j:5-community",
+  "note": "as-built single-substrate actuals; no vector layer. Measured on a recent-commit window (near-HEAD graph = worst-case ingest rate); full-history figures are rate-extrapolated, not wall-clock.",
+  "full_history_commits": 425,
+  "ingest": {
+    "commits": 425,
+    "head_nodes": 1439,
+    "head_edges": 8146,
+    "wall_sec": 600.067,
+    "commits_per_sec": 0.708
+  },
+  "recall": {
+    "seeds": 30,
+    "iters_per_seed": 5,
+    "depth1": {
+      "samples": 150,
+      "p50_ms": 25.309,
+      "p95_ms": 55.783,
+      "max_ms": 487.091
+    },
+    "depth2": {
+      "samples": 150,
+      "p50_ms": 42.195,
+      "p95_ms": 73.579,
+      "max_ms": 87.575
+    }
+  },
+  "rebuild": {
+    "teardown_sec": 0.322,
+    "backfill_sec": 534.322,
+    "commits": 425
+  },
+  "extrapolated_full_history": {
+    "commits": 425,
+    "window_commits_per_sec": 0.708,
+    "est_ingest_sec": 600.1,
+    "caveat": "linear extrapolation of a superlinear cost (ingest slows as the graph grows — see finding); true full-history time is >= this."
+  },
+  "peak_ram": {
+    "neo4j_container_mib": 1105.9,
+    "samples": 571
+  }
+}
