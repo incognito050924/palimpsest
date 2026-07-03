@@ -63,7 +63,7 @@
 | **Relate** ✅ | 엔티티들 | 코드·결정·의도·여정 간 관계 투영 | 질의 가능한 그래프 | 벡터 보완 |
 | **Recall** ✅ | 작업 맥락 질의 | 필요분만 점진 회상(🔶 pull 우선, push 확장) | 관련 조각(토큰 예산 내) | context rot 회피 |
 | **Curate** ◐ | 회상된 자료 | 조합형(계보·여정 구성, ✅) + 생성형(외부 LLM 합성, 적재만 ✅ slice 4) | 답 + **출처+gap+confidence** | 세탁 금지, provider-free |
-| **Reconcile** ⬜ | 브랜치 간 컨텍스트(개인↔팀) | 차이 인정 → 신선도·우선순위 판정 | 무엇이 더 신선/우선인지 | 설계위험 감지(slice 2, wi_260702qe3 ✅)가 그 씨앗 |
+| **Reconcile** ✅ | 브랜치 간 컨텍스트(개인↔팀) | 차이 인정 → 신선도·우선순위 판정 | 무엇이 더 신선/우선인지 | `reconcile_recall` N-way peer 판정 실현(wi_260702y0d); 설계위험 감지(slice 2, wi_260702qe3)가 그 씨앗 |
 
 ⬜ 각 기능의 상세 동작·계약은 슬라이스별로 구체화.
 
@@ -102,6 +102,8 @@
 
 - ✅ **inferred 엣지 확장** (`wi_260702rnu`, **shipped·검증 통과**, ADR-20260702-risk-designdecision-load-contract 엣지집합 확장 충족): `CAUSALLY_RELATES`/`RELATES_TO`/`CONFLICTS_WITH`를 **1급 노드 없는 순수 inferred 엣지**로 일반화 — 전용 로더 `kg/relation.py`(`load_relations`: 양 endpoint grounding·entity-atomic 거부·닫힌 rel_type·MERGE 멱등·provider-free) + 회상 'relations' 채널(회상된 노드에 걸린 관계 역방향 조회, 순회 격리, 8→9키). 소비자=설계위험 감지 충돌(CONFLICTS_WITH) 표시. 검증: 113 passed + fresh-context 독립 리뷰 PASS(behavior-risk finding 0). code=SoT: `src/palimpsest/kg/relation.py`·`recall/graphrag.py`, `tests/kg/test_relation.py`·`tests/recall/test_recall_design_risk.py`. *(self-loop·symmetric 관계 directed 저장은 생성자 책임, change_condition.)*
 
+- ✅ **Reconcile 슬라이스 (브랜치 스코프 정체성)** (`wi_260702y0d`, **shipped·검증 통과**, ADR-20260703-branch-scoped-node-identity): git 브랜치 간(개인↔팀) 컨텍스트 차이를 **1급 인정** — 노드 id에 branch 차원을 접어 같은 심볼의 브랜치 버전이 공존(`reconcile.py`: 브랜치 캡처·scope·branch-gc, backfill '커밋별 버전드 안 만듦'을 branch 축에 한해 supersede). `reconcile_recall(symbol, branches)`가 N-way peer를 **절대 UTC instant 신선도**로 순위(특권 브랜치 없음, 동시 최신 co-freshest, 중립 branch-name tiebreak)·per-branch grounding(author 생략)·display-only 의미층 주석으로 표시. provider-free(조합형, LLM 0). code=SoT: `src/palimpsest/{reconcile.py,recall/graphrag.py,ir.py,kg/ingest.py,cli.py}`, `tests/recall/test_reconcile.py`·`tests/reconcile/`·`tests/e2e/test_reconcile_e2e.py`. *(reconcile_recall 패키지 export·_utc_instant tz-naive 하드닝은 follow-up wi_2607032k6.)*
+
 - 🔶 **유예된 의미층 후속** — 실적재 경로로 실제 사용·고통을 확인하고 각 ADR change-condition을 재검토한 뒤 착수:
 
   | 유예 항목 | 무엇 · 왜 유예 |
@@ -122,7 +124,7 @@
   | 전체 **backfill** ✅ | Capture 소급 발굴(전 git 이력) = git-archive replay(wi_260702asn 실현, 위 로드맵) |
   | **에이전트 트레이스** 캡처 | `Conversation`/`AgentTrace` 엔티티 |
   | **전체 온톨로지** | §2 엔티티·관계 전체 |
-  | **Reconcile** 본격 | 브랜치 간 신선도 중재 |
+  | **Reconcile** 본격 ✅ | 브랜치 간 신선도 중재 = `reconcile_recall` N-way peer 판정(wi_260702y0d 실현, 위 로드맵) |
   | 조직·**cross-repo** | 다중 저장소 스코프 |
 
 ## 7. 미결 · 검증 대상
