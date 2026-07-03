@@ -19,6 +19,7 @@ agreed terms, and learnings over time.
 - **Summary (node)** — 의미층 노드. 외부 에이전트가 생성한 tacit '왜·함정' 요약. id는 `summary:<sha256>` 네임스페이스라 코드 노드와 충돌 불가.
 - **SUMMARIZES (edge)** — Summary→코드 노드 추론 엣지(edge_kind='inferred'). 회상 traversal 화이트리스트 제외 → 'summaries' 분리 채널로만 노출.
 - **의미층 (semantic layer)** — v1 결정론 구조층 위에 얹는 생성형 지식층. slice 4가 첫 적재 계약을 실현(ADR-20260701-semantic-layer-load-contract).
+- **branch-scoped identity (브랜치 스코프 노드 정체성)** — 노드 id(MERGE 키)에 접힌 branch 차원. None이면 bare qualified_name(byte-identical), named면 `branch:{branch}\x1f{qname}`. 같은 심볼의 브랜치 버전이 붕괴 없이 공존 → Reconcile 전제. ADR-20260703이 실현.
 
 전체 정의는 `glossary.json` 참조.
 
@@ -27,6 +28,7 @@ agreed terms, and learnings over time.
 - **ADR-20260626-foundational-architecture** (active) — palimpsest 정초 아키텍처: 본체 = Knowledge Graph, 회상·합성 = GraphRAG(KG 의존), 이력 전부 보존, 캡처 자동 기본. → `adr/ADR-20260626-foundational-architecture.md`
 - **ADR-20260701-v1-ontology-recall-reframe** (active) — v1 첫 슬라이스 재프레임: 설계위험 감지 → KG 온톨로지 구축 + GraphRAG 근거결박 회상. v1은 결정론 구조층만, 생성형·inferred는 유예. → `adr/ADR-20260701-v1-ontology-recall-reframe.md`
 - **ADR-20260701-semantic-layer-load-contract** (active) — palimpsest 의미층 적재 계약: provider-free(LLM 호출 0), 외부 요약을 근거결박·edge_kind='inferred' 분리·provenance 강제로 적재, 회상은 'summaries' 분리 채널. → `adr/ADR-20260701-semantic-layer-load-contract.md`
+- **ADR-20260703-branch-scoped-node-identity** (active) — 브랜치 스코프 노드 정체성: id에 branch 차원을 접어(scope_to_branch, None=bare byte-identical) 같은 심볼의 브랜치 버전이 붕괴 없이 공존. backfill의 '커밋별 버전드 안 만듦'을 branch 축에 한해 supersede, provider-free 유지. → `adr/ADR-20260703-branch-scoped-node-identity.md`
 
 ## v1 초점
 

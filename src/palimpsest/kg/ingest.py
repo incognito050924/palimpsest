@@ -48,9 +48,14 @@ from palimpsest.ir import (
 # DECIDES / SUPERSEDES / ADDRESSES_RISK) are deliberately ABSENT from ``REL_TYPES``
 # — the generic writer must never stamp them ``edge_kind='deterministic'``; their
 # dedicated loaders write them as inferred.
+# A provider-free structural label recording partial-capture honesty for an
+# N-way branch capture (written by ``reconcile``, not an IR node kind). Listed
+# here only so ``create_constraints`` provisions its ``id`` uniqueness CONSTRAINT.
+CAPTURE_MANIFEST = "CaptureManifest"
+
 NODE_LABELS = [
     REPO, PACKAGE, FILE, CLASS, METHOD, "Episode", SUMMARY, COMMUNITY, RISK,
-    DESIGN_DECISION,
+    DESIGN_DECISION, CAPTURE_MANIFEST,
 ]
 REL_TYPES = [CONTAINS, IMPORTS, CALLS, DEPENDS_ON, MEMBER_OF]
 
@@ -61,6 +66,7 @@ UNWIND $rows AS row
 MERGE (n:`{label}` {{id: row.id}})
 SET n.name          = row.name,
     n.qualified_name = row.qualified_name,
+    n.branch        = row.branch,
     n.path          = row.path,
     n.start_line    = row.start_line,
     n.end_line      = row.end_line,
@@ -101,6 +107,45 @@ SET e.name          = row.id,
 """
 
 
+# Branch-plane GC, both keyed on the ``branch`` node property (INGEST contract).
+#
+# (2a) scoped-rebuild: wipe a named branch's whole plane, then re-project it
+# (delete-then-project) so shrink/rebase/tip-move leave no stale nodes. Run ONCE
+# at the start of a branch's backfill (like create_constraints), never per-commit
+# — a per-commit wipe would erase the branch's own earlier commits.
+_WIPE_BRANCH_PLANE = "MATCH (n {branch:$branch}) DETACH DELETE n"
+
+# (2b) reaper: drop every named-branch plane whose branch is not git-present. The
+# ``branch IS NOT NULL`` guard means the bare-id (unspecified) plane is NEVER
+# reaped (ac-6) — an empty ``$live`` still spares the bare plane.
+_REAP_DEAD_BRANCHES = (
+    "MATCH (n) WHERE n.branch IS NOT NULL AND NOT n.branch IN $live "
+    "DETACH DELETE n"
+)
+
+
+def wipe_branch_plane(driver, branch: str) -> None:
+    """Delete a named branch's whole plane before re-projecting it (2a).
+
+    ``branch`` must be a real branch name — never ``None``. Wiping ``None`` would
+    match the bare-id plane, which is MERGE-accumulate and must not be reaped.
+    """
+    if branch is None:
+        raise ValueError("wipe_branch_plane requires a branch name, not None")
+    with driver.session() as session:
+        session.run(_WIPE_BRANCH_PLANE, branch=branch)
+
+
+def reap_dead_branches(driver, live) -> None:
+    """Drop every named-branch plane whose branch is not in ``live`` (2b).
+
+    ``live`` = the git-present tracked branch names. The bare-id plane is spared
+    by the ``branch IS NOT NULL`` guard.
+    """
+    with driver.session() as session:
+        session.run(_REAP_DEAD_BRANCHES, live=list(live))
+
+
 def create_constraints(driver) -> None:
     """One uniqueness CONSTRAINT per node label on the deterministic ``id``."""
     with driver.session() as session:
@@ -117,6 +162,8 @@ def _node_row(node) -> dict:
         "id": node.id,
         "name": node.name,
         "qualified_name": node.qualified_name,
+        # Branch namespace (the GC discriminator); null for the bare-id plane.
+        "branch": node.branch,
         "path": node.path,
         "start_line": node.start_line,
         "end_line": node.end_line,

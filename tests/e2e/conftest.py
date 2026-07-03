@@ -76,3 +76,62 @@ def cli_env(neo4j_container, monkeypatch):
     monkeypatch.setenv("NEO4J_USER", neo4j_container.username)
     monkeypatch.setenv("NEO4J_PASSWORD", neo4j_container.password)
     return neo4j_container
+
+
+# --- multi-branch git repo for the reconcile CLI surface (mirrors -------------
+# tests/reconcile/conftest.py::multi_branch_repo; used by test_reconcile_e2e).
+FIXTURE_JAVA = (
+    FIXTURES
+    / "src/main/java/kr/co/ecoletree/service/commute/service/CommuteService.java"
+)
+RECONCILE_AUTHOR_EMAIL = "reconcile-test@example.com"
+# main's tip is the NEWEST instant, so `main` is the freshest peer (the reconcile
+# e2e asserts main carries the `freshest` marker; no privileged branch otherwise).
+_BASE_DATE = "2020-01-01T00:00:00 +0000"
+_FEAT_DATE = "2020-02-01T00:00:00 +0000"
+_MAIN_DATE = "2020-03-01T00:00:00 +0000"
+
+
+def _git_at(repo: Path, *args: str, date: str | None = None) -> str:
+    env = None
+    if date is not None:
+        env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True, capture_output=True, text=True, env=env,
+    ).stdout
+
+
+@pytest.fixture
+def multi_branch_repo(tmp_path):
+    """A hermetic repo: a shared base then two divergent branches (``main`` newer
+    at a later date than ``feature``'s tip is older — freshness diverges). Same
+    Class qualified_name on both branches, each with a branch-unique method."""
+    repo = tmp_path / "multirepo"
+    repo.mkdir()
+    _git_at(repo, "init", "-b", "main")
+    _git_at(repo, "config", "user.email", RECONCILE_AUTHOR_EMAIL)
+    _git_at(repo, "config", "user.name", "Reconcile Test")
+
+    dst = repo / "CommuteService.java"
+    dst.write_text(FIXTURE_JAVA.read_text())
+    _git_at(repo, "add", "-A")
+    _git_at(repo, "commit", "-m", "base: add CommuteService", date=_BASE_DATE)
+
+    def _add_method(sig: str) -> None:
+        head, _, tail = dst.read_text().rpartition("}")
+        dst.write_text(head + f"\n\t{sig}\n}}" + tail)
+
+    # feature branch from base (older tip)
+    base = _git_at(repo, "rev-list", "--max-parents=0", "HEAD").strip()
+    _git_at(repo, "checkout", "-b", "feature", base)
+    _add_method("public Map<String, Object> selectOnFeature(Map<String, Object> p);")
+    _git_at(repo, "add", "-A")
+    _git_at(repo, "commit", "-m", "feature: probe", date=_FEAT_DATE)
+
+    # main tip (newer)
+    _git_at(repo, "checkout", "main")
+    _add_method("public Map<String, Object> selectOnMain(Map<String, Object> p);")
+    _git_at(repo, "add", "-A")
+    _git_at(repo, "commit", "-m", "main: probe", date=_MAIN_DATE)
+    return repo

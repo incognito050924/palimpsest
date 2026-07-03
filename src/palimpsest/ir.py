@@ -20,8 +20,27 @@ The structure is plain dataclasses; ``to_dict()`` yields dict/JSON-serializable 
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
+
+# Unit Separator (0x1f) — joins a branch namespace to a qualified_name in a
+# branch-scoped id. Like the ``summary:`` / ``community:`` prefixes it guarantees
+# a scoped id can never collide with a bare qualified_name.
+_BRANCH_US = "\x1f"
+
+
+def branch_scoped_id(branch: Optional[str], qualified_name: str) -> str:
+    """The pure identity fn shared by node ids AND edge endpoints.
+
+    ``branch=None`` returns the bare ``qualified_name`` (byte-identical to
+    single-branch capture — additive). A named branch folds into the MERGE key
+    as ``branch:<branch>\\x1f<qualified_name>`` so N branches of one symbol
+    coexist as distinct nodes (ac-1). Using the SAME fn for node ids and edge
+    src/dst keeps ids and endpoints consistent and capture-order-invariant.
+    """
+    if branch is None:
+        return qualified_name
+    return f"branch:{branch}{_BRANCH_US}{qualified_name}"
 
 # Node kinds
 REPO = "Repo"
@@ -108,10 +127,14 @@ class Node:
     path: Optional[str] = None
     start_line: Optional[int] = None
     end_line: Optional[int] = None
+    # Branch namespace folded into IDENTITY (the MERGE key), None for the bare
+    # single-branch plane. Set by ``scope_to_branch``; persisted as a node
+    # property (the GC discriminator).
+    branch: Optional[str] = None
 
     @property
     def id(self) -> str:
-        return self.qualified_name
+        return branch_scoped_id(self.branch, self.qualified_name)
 
     def to_dict(self) -> dict:
         return {
@@ -179,6 +202,28 @@ class IR:
         return any(
             e.kind == kind and e.src == src and e.dst == dst for e in self.edges
         )
+
+
+def scope_to_branch(ir: IR, branch: Optional[str]) -> IR:
+    """Pure transform: return a NEW IR whose identities are folded into ``branch``.
+
+    Stamps ``branch`` on every code Node and rewrites every edge's src/dst via the
+    SAME pure fn (:func:`branch_scoped_id`) so scoped node ids and edge endpoints
+    stay consistent and capture-order-invariant. The input IR is NOT mutated, so
+    one extracted IR can be fanned out to several branches. ``branch=None`` yields
+    a byte-identical copy (Episodes stay bare — they are commit-scoped and derived
+    from provenance at ingest, never in ``ir.nodes``).
+    """
+    nodes = [replace(n, branch=branch) for n in ir.nodes]
+    edges = [
+        replace(
+            e,
+            src=branch_scoped_id(branch, e.src),
+            dst=branch_scoped_id(branch, e.dst),
+        )
+        for e in ir.edges
+    ]
+    return IR(nodes=nodes, edges=edges)
 
 
 @dataclass(frozen=True)

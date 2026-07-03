@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1.0",
   "project_name": "palimpsest",
-  "updated_at": "2026-07-01T00:00:00.000Z",
+  "updated_at": "2026-07-03T00:00:00.000Z",
   "context_path": ".ditto/knowledge/CONTEXT.md",
   "glossary_path": ".ditto/knowledge/glossary.json",
   "project_map_path": null,

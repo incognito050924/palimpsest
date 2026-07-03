@@ -48,6 +48,8 @@ from palimpsest.extract import extract, read_provenance
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
 from palimpsest.recall import recall
+from palimpsest.recall.graphrag import reconcile_recall
+from palimpsest.reconcile import capture
 
 DEFAULT_URI = "bolt://localhost:7687"
 DEFAULT_USER = "neo4j"
@@ -94,6 +96,92 @@ def _cmd_query(args) -> None:
     with _driver() as driver:
         result = recall(driver, args.symbol, depth=args.depth, limit=args.limit)
     _print_result(args.symbol, args.depth, args.limit, result)
+
+
+def _cmd_reconcile(args) -> int:
+    # The explicit branch set IS the comparison scope (ac-6): only these branches
+    # are captured + compared; unspecified branches never enter the query.
+    branches = args.branch or []
+    if not branches:
+        # N=0: defined, honest behavior — never a crash. There is nothing to
+        # compare without at least one branch to scope the comparison to.
+        print(
+            "reconcile: no branch specified; pass at least one --branch to "
+            "define the comparison scope"
+        )
+        return 2
+    with _driver() as driver:
+        try:
+            # capture() validates the branch set git-safely (--end-of-options /
+            # --verify), dedups, and fails closed on a shallow repo; a bad branch
+            # or shallow repo raises. Catch it here so the CLI prints an honest
+            # error instead of leaking a raw Python traceback.
+            capture(driver, args.repo, branches)
+            result = reconcile_recall(
+                driver, args.symbol, branches, limit=args.limit
+            )
+        except (ValueError, RuntimeError) as exc:
+            print(f"reconcile error: {exc}")
+            return 2
+    _print_reconcile(args.symbol, result)
+    return 0
+
+
+def _semantic_annotations(semantic) -> list[str]:
+    """Flatten the DISPLAY-ONLY inferred layer bound to a peer into terse
+    (verdict, confidence, source) lines. palimpsest generates none of it — this
+    only surfaces what an external judge already loaded. Author-omitted."""
+    lines = []
+    for channel in ("summaries", "risks", "decisions", "relations"):
+        for entry in semantic.get(channel, []):
+            verdict = entry.get("semantic_verdict")
+            has_conf = entry.get("confidence") is not None
+            if verdict is None and not has_conf:
+                continue
+            v = verdict.get("verdict") if isinstance(verdict, dict) else verdict
+            src = entry.get("source_commit") or entry.get("code_bound_at")
+            lines.append(
+                f"verdict={v} confidence={entry.get('confidence')} source={src}"
+            )
+    return lines
+
+
+def _print_reconcile(symbol, result) -> None:
+    # SEPARATED sections (mirrors _print_result): per-branch PEERS, then the
+    # computed CODE DIVERGENCE, then the surfaced CONFLICTS, then GAPS — never a
+    # merged prose answer, and no privileged branch.
+    peers = result["peers"]
+    branches = result["branches"]
+    print(f"RECONCILE: {symbol}  (branches={', '.join(branches)})")
+    print()
+    print(f"PEERS ({len(peers)})")
+    if not peers:
+        print("  (none)")
+    for p in peers:
+        rank = "freshest" if p["freshest"] else "older"
+        print(f"  - [{p['branch']}] {p['qualified_name'] or p['id']}  ({rank})")
+        print(f"      source: {_fmt_source(p['sources'])}")
+        for ann in _semantic_annotations(p["semantic"]):
+            print(f"      semantic: {ann}")
+    print()
+    div = result["code_divergence"]
+    print(f"CODE DIVERGENCE: diverged={div['diverged']}")
+    for c in div["source_commits"]:
+        print(f"  - {c}")
+    print()
+    conflicts = result["conflict_edges"]
+    print(f"CONFLICTS ({len(conflicts)})")
+    if not conflicts:
+        print("  (none)")
+    for e in conflicts:
+        print(f"  - {e['source_id']} CONFLICTS_WITH {e['target_id']}")
+    print()
+    gaps = result["gaps"]
+    print(f"GAPS ({len(gaps)})")
+    if not gaps:
+        print("  (none)")
+    for g in gaps:
+        print(f"  - {g}")
 
 
 def _read_payload_file(path) -> list:
@@ -205,13 +293,29 @@ def build_parser() -> argparse.ArgumentParser:
         "files — the git-tracked source-of-truth to rebuild Neo4j from",
     )
     p_load.set_defaults(func=_cmd_load)
+
+    p_rec = sub.add_parser(
+        "reconcile",
+        help="N-way branch comparison for one symbol (capture then compare "
+        "branch-scoped peers as equals, sections kept separate)",
+    )
+    p_rec.add_argument("symbol", help="the target symbol qualified_name to compare")
+    p_rec.add_argument(
+        "--branch", action="append", metavar="BRANCH",
+        help="a branch in the comparison scope; repeat for N branches. The "
+        "explicit set IS the scope — unspecified branches are excluded.",
+    )
+    p_rec.add_argument("--repo", required=True, help="path to the git repository to capture")
+    p_rec.add_argument("--limit", type=int, default=25, help="max peers per branch (default 25)")
+    p_rec.set_defaults(func=_cmd_reconcile)
     return parser
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    args.func(args)
-    return 0
+    # Existing subcommands return None (-> 0, byte-identical); reconcile returns an
+    # explicit exit code so honest rejections (bad/missing branch) are non-zero.
+    return args.func(args) or 0
 
 
 if __name__ == "__main__":

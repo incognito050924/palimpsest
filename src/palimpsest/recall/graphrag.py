@@ -44,6 +44,7 @@ Design (ac-2 recall + ac-3 honesty):
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from palimpsest.ir import (
     CALLS,
@@ -723,3 +724,150 @@ def expand(driver, handle, limit=25):
         _decisions(driver, new_items, limit),
         _relations(driver, new_items, limit),
     )
+
+
+# The branch-scoped peers of one symbol: every node whose ``qualified_name`` equals
+# the symbol AND whose ``branch`` is in the caller's set. Grouping is by the stored
+# ``qualified_name`` property (branch-scoped ids differ, so ids cannot group them).
+# ``branch IN $branches`` excludes the bare-id plane (branch=null) and any
+# unspecified branch by construction (ac-6). Author (%ae) is NEVER selected —
+# author-omission holds by projection. Deterministic neutral order (branch) for a
+# stable tiebreak; the real order key is computed client-side (the UTC instant).
+_BRANCH_PEERS = """
+MATCH (n) WHERE n.qualified_name = $symbol AND n.branch IN $branches
+RETURN n.id AS id, n.branch AS branch, n.qualified_name AS qualified_name,
+       labels(n) AS labels, n.name AS name,
+       n.path AS path, n.start_line AS start_line, n.end_line AS end_line,
+       n.source_commit AS source_commit, n.committed_at AS committed_at
+ORDER BY n.branch
+"""
+
+
+def _utc_instant(committed_at):
+    """The absolute UTC instant of a raw ``committed_at`` (%cI, ISO-8601 with tz
+    offset). py3.12 ``fromisoformat`` parses the offset -> a tz-aware datetime that
+    compares by absolute instant. Missing/unparseable -> None (sorts last, never
+    freshest). Pure comparison — no LLM, no mutation of the stored value."""
+    if not committed_at:
+        return None
+    try:
+        return datetime.fromisoformat(committed_at)
+    except (ValueError, TypeError):
+        return None
+
+
+def _peer_semantic(driver, peer_id, limit):
+    """The inferred semantic layer bound to ONE peer, read exactly like the main
+    recall channels (each helper json.loads the stored verdict; absent -> None).
+    DISPLAY-ONLY: freshness orders the peers, this is shown alongside, non-merged.
+    palimpsest generates none of it — it only surfaces what an external judge loaded."""
+    items = [{"id": peer_id}]
+    return {
+        "summaries": _summaries(driver, items, limit),
+        "risks": _risks(driver, items, limit),
+        "decisions": _decisions(driver, items, limit),
+        "relations": _relations(driver, items, limit),
+    }
+
+
+def _ranked_peers(rows):
+    """Order the peers newest-UTC-instant first, with a stability-only neutral
+    tiebreak (branch name) — branch name carries NO priority. Peers with an
+    unparseable/missing instant sort last. ``freshest:true`` on every peer at the
+    max instant (co-freshest when tied; no fabricated single winner)."""
+    parseable, unparseable = [], []
+    for r in rows:
+        r["_instant"] = _utc_instant(r.get("committed_at"))
+        (parseable if r["_instant"] is not None else unparseable).append(r)
+    # Stable two-key sort: tiebreak (branch asc) first, then primary (instant desc).
+    parseable.sort(key=lambda r: r["branch"])
+    parseable.sort(key=lambda r: r["_instant"], reverse=True)
+    unparseable.sort(key=lambda r: r["branch"])
+    ordered = parseable + unparseable
+    top = parseable[0]["_instant"] if parseable else None
+    for r in ordered:
+        # aware-datetime == compares the absolute instant, so cross-zone ties match.
+        r["freshest"] = top is not None and r["_instant"] == top
+    return ordered
+
+
+def _peer_entry(driver, r, limit):
+    return {
+        "id": r["id"],
+        "branch": r["branch"],
+        "qualified_name": r["qualified_name"],
+        "kind": _kind(r.get("labels")),
+        "committed_at": r.get("committed_at"),
+        "freshest": r["freshest"],
+        # per-branch grounding (author-omitted via _sources) — the 출처.
+        "source_commit": r.get("source_commit"),
+        "sources": _sources(r),
+        # display-only semantic annotation (external-bound; verdict + confidence).
+        "semantic": _peer_semantic(driver, r["id"], limit),
+    }
+
+
+def reconcile_recall(driver, symbol, branches, limit=25):
+    """N-way peer reconcile recall over one symbol's branch-scoped planes.
+
+    Compares the branch-scoped peers of ``symbol`` across EXACTLY the caller's
+    ``branches`` (ac-6) — as equals, with NO privileged branch. Peers are ranked
+    by the absolute UTC instant of their ``committed_at`` (newest first; a neutral
+    branch-name tiebreak is stability-only), the max-instant peer(s) flagged
+    ``freshest``. Each peer carries its per-branch grounding (author-omitted) and
+    a DISPLAY-ONLY semantic annotation read from the already-stored inferred layer
+    (verdict + confidence + source_commit + code_bound_at) — palimpsest generates
+    nothing here (zero LLM/provider calls).
+
+    Cross-branch conflict is surfaced on two non-generative tracks, labeled
+    distinctly: ``conflict_edges`` = EXISTING CONFLICTS_WITH edges touching the
+    peers (via the relations channel, never newly created); ``code_divergence`` =
+    a pure computed observation that the peers share the symbol but differ in
+    ``source_commit``. Returns
+    ``{symbol, branches, peers, code_divergence, conflict_edges, gaps}``.
+    """
+    branch_set = sorted(set(branches))
+    with driver.session() as session:
+        rows = [
+            r.data()
+            for r in session.run(_BRANCH_PEERS, symbol=symbol, branches=branch_set)
+        ]
+
+    if not rows:
+        return {
+            "symbol": symbol,
+            "branches": branch_set,
+            "peers": [],
+            "code_divergence": {"source_commits": [], "diverged": False},
+            "conflict_edges": [],
+            "gaps": [f"symbol '{symbol}' has no peers in branches {branch_set}"],
+        }
+
+    ordered = _ranked_peers(rows)
+    peers = [_peer_entry(driver, r, limit) for r in ordered]
+
+    # Track (b): structural divergence — a pure computed observation (no edge
+    # written, no edge_kind='inferred' laundering). Peers share the symbol; if they
+    # differ in source_commit, the code has diverged across branches.
+    source_commits = sorted({r.get("source_commit") for r in rows if r.get("source_commit")})
+    code_divergence = {
+        "source_commits": source_commits,
+        "diverged": len(source_commits) > 1,
+    }
+
+    # Track (a): EXISTING CONFLICTS_WITH edges touching the peers, surfaced via the
+    # relations channel (never newly created). Distinct from the computed divergence.
+    peer_items = [{"id": r["id"]} for r in ordered]
+    conflict_edges = [
+        e for e in _relations(driver, peer_items, limit)
+        if e["rel_type"] == "CONFLICTS_WITH"
+    ]
+
+    return {
+        "symbol": symbol,
+        "branches": branch_set,
+        "peers": peers,
+        "code_divergence": code_divergence,
+        "conflict_edges": conflict_edges,
+        "gaps": [],
+    }

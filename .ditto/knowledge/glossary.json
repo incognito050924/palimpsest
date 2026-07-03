@@ -1,8 +1,14 @@
 {
   "schema_version": "0.1.0",
   "project_name": "palimpsest",
-  "updated_at": "2026-07-01T00:00:00.000Z",
+  "updated_at": "2026-07-03T00:00:00.000Z",
   "entries": [
+    {
+      "term": "branch-scoped identity (브랜치 스코프 노드 정체성)",
+      "definition": "노드 정체성(id = MERGE 키)에 접힌 branch 차원. branch=None이면 bare qualified_name(기존 단일-브랜치 캡처와 byte-identical), named branch면 `branch:{branch}\\x1f{qualified_name}`(US 0x1f 네임스페이스 프리픽스). 같은 심볼의 divergent 브랜치 버전이 붕괴 없이 별개 노드로 공존하게 해 Reconcile(브랜치 간 설계위험 감지)의 전제를 성립시킨다. 순수 변환 scope_to_branch로 적용(노드 id·엣지 endpoint 동일 함수). branch는 GC 판별 속성으로도 저장. ADR-20260703-branch-scoped-node-identity가 실현(backfill의 '커밋별 버전드 안 만듦'을 branch 축에 한해 supersede).",
+      "status": "agreed",
+      "agreed_at": "2026-07-03T00:00:00.000Z"
+    },
     {
       "term": "palimpsest",
       "definition": "코드 표면 아래 의사결정·의도 층을 다시 읽게 하는 Knowledge Graph 기반 장기기억·지식 큐레이터.",
