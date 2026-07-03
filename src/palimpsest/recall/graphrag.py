@@ -747,13 +747,19 @@ def _utc_instant(committed_at):
     """The absolute UTC instant of a raw ``committed_at`` (%cI, ISO-8601 with tz
     offset). py3.12 ``fromisoformat`` parses the offset -> a tz-aware datetime that
     compares by absolute instant. Missing/unparseable -> None (sorts last, never
-    freshest). Pure comparison — no LLM, no mutation of the stored value."""
+    freshest). A tz-NAIVE value (no offset) is also treated as unparseable: it
+    cannot be compared against the tz-aware peers without raising, and the %cI
+    contract always emits an offset, so a naive value is off-contract, not a
+    rankable instant. Pure comparison — no LLM, no mutation of the stored value."""
     if not committed_at:
         return None
     try:
-        return datetime.fromisoformat(committed_at)
+        instant = datetime.fromisoformat(committed_at)
     except (ValueError, TypeError):
         return None
+    if instant.tzinfo is None or instant.tzinfo.utcoffset(instant) is None:
+        return None  # tz-naive: off-contract, sort last like unparseable
+    return instant
 
 
 def _peer_semantic(driver, peer_id, limit):

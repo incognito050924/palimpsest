@@ -41,6 +41,17 @@ SYMBOL = "recon.Widget#render(Ctx)"
 OTHER = "recon.Widget#paint(Ctx)"
 
 
+# ── package surface: reconcile_recall is a first-class recall entry point ─────
+
+def test_reconcile_recall_is_exported_from_recall_package():
+    """``reconcile_recall`` is reachable as ``palimpsest.recall.reconcile_recall``,
+    the same as its sibling recall entry points — not only via the graphrag module."""
+    from palimpsest.recall import reconcile_recall as pkg_reconcile
+    from palimpsest.recall.graphrag import reconcile_recall as mod_reconcile
+
+    assert pkg_reconcile is mod_reconcile
+
+
 def _peer_ir(branch, qn, commit, committed_at, author):
     """A one-node branch plane for ``qn`` (grounded, author carried on provenance)."""
     prov = Provenance(source_commit=commit, author=author, committed_at=committed_at)
@@ -103,6 +114,23 @@ def test_unparseable_committed_at_sorts_last_and_never_freshest(recall_db):
     assert out["peers"][-1]["branch"] == "bad"
     assert _branch(out["peers"], "bad")["freshest"] is False
     assert _branch(out["peers"], "good")["freshest"] is True
+
+
+def test_tz_naive_committed_at_sorts_last_without_raising(recall_db):
+    """A ``committed_at`` with NO tz offset parses to a tz-naive datetime, which
+    cannot be compared against the tz-aware peers — a mixed sort would raise
+    ``TypeError``. Treat the naive value like an unparseable one: sort it last,
+    never freshest, and never raise. (The %cI contract always emits an offset, so
+    this is a defensive guard for a state the current pipeline cannot produce.)"""
+    _ingest_peer(recall_db, "aware", SYMBOL, "a" * 40,
+                 "2025-06-01T00:00:00+00:00", "a <a@x.io>")
+    _ingest_peer(recall_db, "naive", SYMBOL, "n" * 40,
+                 "2025-06-01T12:00:00", "n <n@x.io>")  # no offset -> tz-naive
+
+    out = reconcile_recall(recall_db, SYMBOL, ["aware", "naive"])  # must not raise
+    assert out["peers"][-1]["branch"] == "naive"
+    assert _branch(out["peers"], "naive")["freshest"] is False
+    assert _branch(out["peers"], "aware")["freshest"] is True
 
 
 # ── ac-3: no privileged branch ───────────────────────────────────────────────

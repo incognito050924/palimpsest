@@ -12,7 +12,15 @@ from palimpsest.recall.graphrag import (
     recall_community,
     recall_risk,
     recall_decision,
+    reconcile_recall,
     expand,
 )
 
-__all__ = ["recall", "recall_community", "recall_risk", "recall_decision", "expand"]
+__all__ = [
+    "recall",
+    "recall_community",
+    "recall_risk",
+    "recall_decision",
+    "reconcile_recall",
+    "expand",
+]
