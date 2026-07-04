@@ -327,7 +327,7 @@ agent는 사용자 작업공간을 공유한다.
 agent는 모호함을 드러내고, 작게 바꾸고, 증거로만 완료를 말하고, 사용자의 의도를 조용히 줄이지 않는다. 별것 아닌 듯 보이지만, 이 업계에서는 그게 꽤 높은 기준이다.
 <!-- ditto:managed:end -->
 
-<!-- ditto:knowledge:start sha256=0b0d399f8a9c49b97fdbc1c3b84e9e40b8c8b29958d116029096dbdf3df6ec5c -->
+<!-- ditto:knowledge:start sha256=dc97c9e220a5e2e648357b28d255204c8e5abebcea40ea0b0caedb095c8278af -->
 # DITTO Knowledge (projected — do not edit by hand)
 
 Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summary.
@@ -343,19 +343,22 @@ Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summ
 - Knowledge Graph (본체)
 - SUMMARIZES (edge)
 - Summary (node)
+- branch-scoped identity (브랜치 스코프 노드 정체성)
 - design-risk slice
 - edge_kind
-- branch-scoped identity (브랜치 스코프 노드 정체성)
 - palimpsest
 - 의미층 (semantic layer)
 
 ## Architecture decisions
 - ADR-20260626-foundational-architecture · active · ADR-20260626-foundational-architecture — palimpsest 정초 아키텍처: Knowledge Graph 본체 + GraphRAG 회상층
 - ADR-20260701-semantic-layer-load-contract · active · ADR-20260701-semantic-layer-load-contract — palimpsest 의미층 적재 계약: provider-free, 근거결박·inferred 분리·분리 채널 회상
-- ADR-20260703-branch-scoped-node-identity · active · ADR-20260703-branch-scoped-node-identity — 브랜치 스코프 노드 정체성: id에 branch 차원을 접어 같은 심볼의 브랜치 버전 공존, backfill '커밋별 버전드 안 만듦'을 branch 축에 한해 supersede, provider-free 유지
 - ADR-20260701-v1-ontology-recall-reframe · active · ADR-20260701-v1-ontology-recall-reframe — v1 첫 슬라이스 재프레임: 설계위험 감지 → 온톨로지 + grounded 회상
+- ADR-20260702-backfill-history-capture · active · ADR-20260702-backfill-history-capture — 전 git 이력 backfill: git-archive replay + projection-over-history + Repo id 안정성
 - ADR-20260702-community-deterministic-structural · active · ADR-20260702-community-deterministic-structural — Community 멤버십 = 결정론적 구조 분할(inferred 아님), CommunityReport prose는 유예
 - ADR-20260702-communityreport-load-contract · active · ADR-20260702-communityreport-load-contract — CommunityReport 적재 계약: ADR-20260701 적재 계약을 target=Community로 정련(로더 실현)
+- ADR-20260702-decision-lineage-freshness · active · ADR-20260702-decision-lineage-freshness — 신선도 2축(결정-계보): DesignDecision bi-temporal validity(valid_from/valid_to), SUPERSEDES invalidate=전이력 보존
 - ADR-20260702-risk-designdecision-load-contract · active · ADR-20260702-risk-designdecision-load-contract — Risk·DesignDecision 적재 계약: ADR-20260701을 1급 inferred 시맨틱 엔티티(노드+엣지)로 일반화(Risk·DesignDecision 로더 실현)
+- ADR-20260703-branch-scoped-node-identity · active · ADR-20260703-branch-scoped-node-identity — 브랜치 스코프 노드 정체성: id의 branch 차원 (versioned-by-branch)
+- ADR-20260704-semantic-embedding-load-contract · active · ADR-20260704-semantic-embedding-load-contract — palimpsest 의미층 임베딩 적재 계약: provider-free, 인덱스당 단일 model·차원 pin·독립 코사인-KNN 회상 채널
 
 <!-- ditto:knowledge:end -->
