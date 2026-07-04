@@ -48,7 +48,7 @@ from palimpsest.extract import extract, read_provenance
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
 from palimpsest.kg.summary import create_vector_index
-from palimpsest.recall import recall
+from palimpsest.recall import recall, recall_churn, recall_cochange
 from palimpsest.recall.graphrag import reconcile_recall
 from palimpsest.reconcile import capture
 
@@ -89,8 +89,21 @@ def _cmd_backfill(args) -> None:
         result = backfill(driver, args.repo)
     print(
         f"backfilled {result.commits} commits from {args.repo} "
-        f"({result.nodes} nodes, {result.edges} edges at HEAD)"
+        f"({result.nodes} nodes, {result.edges} edges at HEAD, "
+        f"{result.modifies} MODIFIES edges)"
     )
+
+
+def _cmd_churn(args) -> None:
+    with _driver() as driver:
+        result = recall_churn(driver, limit=args.limit)
+    _print_channel("CHURN", "churn", result, args.limit)
+
+
+def _cmd_cochange(args) -> None:
+    with _driver() as driver:
+        result = recall_cochange(driver, args.file, limit=args.limit)
+    _print_channel("CO-CHANGE", "cochange", result, args.limit, seed=args.file)
 
 
 def _cmd_query(args) -> None:
@@ -261,6 +274,30 @@ def _print_result(symbol, depth, limit, result) -> None:
         print(f"MORE: {len(frontier)} frontier node(s) not expanded (bounded)")
 
 
+def _print_channel(title, count_key, result, limit, seed=None) -> None:
+    # A SEPARATE section per MODIFIES channel (mirrors _print_result): the ranked
+    # Files (each with its commit + file:line source and the count that ranked it),
+    # then the GAPS — with a ``(none)`` empty case, never a confident empty answer.
+    items = result["items"]
+    head = f"{title}: {seed}  (limit={limit})" if seed else f"{title}  (limit={limit})"
+    print(head)
+    print()
+    print(f"{title} ({len(items)})")
+    if not items:
+        print("  (none)")
+    for it in items:
+        n = it.get(count_key)
+        print(f"  - {it['kind']} {it['qualified_name'] or it['id']}  [{count_key}={n}]")
+        print(f"      source: {_fmt_source(it['sources'])}")
+    print()
+    gaps = result["gaps"]
+    print(f"GAPS ({len(gaps)})")
+    if not gaps:
+        print("  (none)")
+    for g in gaps:
+        print(f"  - {g}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="palimpsest", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -314,6 +351,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_rec.add_argument("--repo", required=True, help="path to the git repository to capture")
     p_rec.add_argument("--limit", type=int, default=25, help="max peers per branch (default 25)")
     p_rec.set_defaults(func=_cmd_reconcile)
+
+    p_churn = sub.add_parser(
+        "churn",
+        help="the churn hotspots — Files ranked by how many commits touched them",
+    )
+    p_churn.add_argument("--limit", type=int, default=25, help="max hotspots (default 25)")
+    p_churn.set_defaults(func=_cmd_churn)
+
+    p_cc = sub.add_parser(
+        "cochange",
+        help="Files co-changed with a File (touched by the same commits)",
+    )
+    p_cc.add_argument("file", help="a repo-relative File path (a File node id)")
+    p_cc.add_argument("--limit", type=int, default=25, help="max co-changed files (default 25)")
+    p_cc.set_defaults(func=_cmd_cochange)
     return parser
 
 

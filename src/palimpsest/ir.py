@@ -59,6 +59,13 @@ CALLS = "CALLS"
 DEPENDS_ON = "DEPENDS_ON"
 # A Class is a MEMBER_OF exactly one Community (exclusive, flat partition).
 MEMBER_OF = "MEMBER_OF"
+# An Episode (a commit) MODIFIES the File(s) that commit changed — the churn /
+# co-change spine. Deterministic (derived from ``git diff-tree``, no judgment):
+# src is a bare commit-scoped Episode (never an ``ir.nodes`` entry), dst a
+# branch-scoped File id. Written by a DEDICATED loader (Episodes live outside the
+# generic node/edge path), and deliberately absent from recall's traversal
+# whitelist so a churn edge never drags an author-bearing Episode into items.
+MODIFIES = "MODIFIES"
 
 # Inferred semantic layer: externally-generated summaries (palimpsest is
 # provider-free — it never calls an LLM; a summary is produced elsewhere and

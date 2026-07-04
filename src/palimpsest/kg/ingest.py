@@ -34,6 +34,7 @@ from palimpsest.ir import (
     CALLS,
     DEPENDS_ON,
     MEMBER_OF,
+    MODIFIES,
     SUMMARY,
     RISK,
     DESIGN_DECISION,
@@ -57,7 +58,12 @@ NODE_LABELS = [
     REPO, PACKAGE, FILE, CLASS, METHOD, "Episode", SUMMARY, COMMUNITY, RISK,
     DESIGN_DECISION, CAPTURE_MANIFEST,
 ]
-REL_TYPES = [CONTAINS, IMPORTS, CALLS, DEPENDS_ON, MEMBER_OF]
+# MODIFIES is a deterministic rel type, but it is written by a DEDICATED loader
+# (``ingest_modifies``), never the generic ``_REL_MERGE`` path: its src is a bare
+# Episode (a commit SHA) that lives OUTSIDE ``ir.nodes``, so ``ingest``'s
+# ``id_to_label`` map has no entry for it and the generic path would silently drop
+# every MODIFIES edge. Listed here for the ontology registry only.
+REL_TYPES = [CONTAINS, IMPORTS, CALLS, DEPENDS_ON, MEMBER_OF, MODIFIES]
 
 # A MERGE-on-id per label; property SET is uniform (unused props resolve to
 # null, which Neo4j drops — Repo/Package simply carry no path/line grounding).
@@ -105,6 +111,47 @@ SET e.name          = row.id,
     e.committed_at  = row.committed_at,
     e.code_bound_at = row.committed_at
 """
+
+# Episode -[:MODIFIES]-> File, written by the DEDICATED loader below. BOTH
+# endpoints are MATCHed (never merged): the Episode is written by the commit's
+# own ingest, and the File is a HEAD-projection node — a changed path with no File
+# node (e.g. deleted and never re-added) is silently skipped rather than
+# materialised as a phantom File (ac-2: File keeps its HEAD-MERGE invariant). The
+# edge MERGE is idempotent, so re-ingest / re-backfill converge with no
+# duplicates. ``count(r)`` reports how many edges actually landed (rows whose File
+# did not resolve produce no row).
+_MODIFIES_MERGE = """
+UNWIND $rows AS row
+MATCH (e:Episode {id: row.episode_id})
+MATCH (f:File {id: row.file_id})
+MERGE (e)-[r:MODIFIES]->(f)
+SET r.edge_kind     = $edge_kind,
+    r.source_commit = row.episode_id,
+    r.committed_at  = row.committed_at,
+    r.code_bound_at = row.committed_at
+RETURN count(r) AS n
+"""
+
+
+def ingest_modifies(driver, rows) -> int:
+    """Write Episode -[:MODIFIES]-> File edges via the dedicated loader.
+
+    ``rows`` is a list of ``{episode_id, file_id, committed_at}``. Returns the
+    number of edges that actually landed (a row whose File id has no HEAD node is
+    skipped, never a phantom File — ac-2). Idempotent (edge MERGE), so re-running
+    backfill converges. Deterministic and provider-free (no LLM anywhere).
+    """
+    if not rows:
+        return 0
+
+    def _write(tx):
+        rec = tx.run(
+            _MODIFIES_MERGE, rows=list(rows), edge_kind=EDGE_KIND_DETERMINISTIC
+        ).single()
+        return rec["n"] if rec else 0
+
+    with driver.session() as session:
+        return session.execute_write(_write)
 
 
 # Branch-plane GC, both keyed on the ``branch`` node property (INGEST contract).

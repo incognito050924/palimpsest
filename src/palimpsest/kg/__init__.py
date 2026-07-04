@@ -16,7 +16,7 @@ from palimpsest.kg.decision import (
     decision_id,
     load_design_decisions,
 )
-from palimpsest.kg.ingest import create_constraints, ingest
+from palimpsest.kg.ingest import create_constraints, ingest, ingest_modifies
 from palimpsest.kg.relation import (
     RelationLoadResult,
     RelationRejection,
@@ -38,6 +38,7 @@ from palimpsest.kg.summary import (
 __all__ = [
     "create_constraints",
     "ingest",
+    "ingest_modifies",
     "load_summaries",
     "summary_id",
     "SummaryLoadResult",

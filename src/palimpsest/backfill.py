@@ -22,8 +22,14 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from palimpsest.extract import extract, read_provenance
-from palimpsest.kg import augment_communities, create_constraints, ingest
+from palimpsest.extract import changed_paths, extract, read_provenance
+from palimpsest.ir import branch_scoped_id
+from palimpsest.kg import (
+    augment_communities,
+    create_constraints,
+    ingest,
+    ingest_modifies,
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +44,10 @@ class BackfillResult:
     commits: int
     nodes: int = 0
     edges: int = 0
+    # Total Episode -[:MODIFIES]-> File edges landed across the whole replay (a
+    # cross-commit sum, unlike ``nodes``/``edges`` which are the HEAD IR sizes):
+    # MODIFIES is a per-commit fact, so every commit contributes its own edges.
+    modifies: int = 0
 
 
 def _commits_oldest_first(repo_path: str) -> list[str]:
@@ -82,7 +92,7 @@ def backfill(driver, repo_path: Path | str) -> BackfillResult:
     repo_name = Path(repo_path).resolve().name
 
     create_constraints(driver)
-    nodes = edges = 0
+    nodes = edges = modifies = 0
     for sha in shas:
         with tempfile.TemporaryDirectory() as tmp:
             _materialize_tree(repo_path, sha, tmp)
@@ -90,6 +100,19 @@ def backfill(driver, repo_path: Path | str) -> BackfillResult:
             ir = extract(tmp, prov, repo_name=repo_name)
             augment_communities(ir, prov)
             ingest(driver, ir)
+            # MODIFIES: bind this commit's Episode to only the File(s) it changed.
+            # File ids share the bare (branch=None) plane backfill projects into, so
+            # ``branch_scoped_id(None, path) == path`` — the SAME identity fn the
+            # File nodes use, keeping endpoints consistent (a deleted path resolves
+            # to no File node and is skipped by the writer's MATCH, never a phantom).
+            rows = [
+                {"episode_id": sha, "file_id": branch_scoped_id(None, path),
+                 "committed_at": prov.committed_at}
+                for path in changed_paths(repo_path, sha)
+            ]
+            modifies += ingest_modifies(driver, rows)
             nodes, edges = len(ir.nodes), len(ir.edges)
 
-    return BackfillResult(commits=len(shas), nodes=nodes, edges=edges)
+    return BackfillResult(
+        commits=len(shas), nodes=nodes, edges=edges, modifies=modifies
+    )

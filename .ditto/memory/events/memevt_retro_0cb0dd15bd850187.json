@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1.0",
+  "event_id": "memevt_retro_0cb0dd15bd850187",
+  "event_type": "analysis",
+  "actor": {
+    "kind": "agent",
+    "role": "retrospective"
+  },
+  "text": "[residual] 나중에 그래프/회상이 네트워크·인증 서비스로 노출되면 회상도달 가능해진 author-bearing Episode가 그 auth 경계 뒤에 놓이나, 그런 표면은 없고 도입되지도 않음.\n[residual] churn/co-change 그래프(이제 author-bearing Episode 도달)가 공유 서비스로 노출되면 대량 스크래핑 가능하나, 그 노출은 범위 밖이고 pii-leak가 별도 커버.\n[residual] author email은 개인정보(pii-leak가 커버)지 credential 아님. 경로명은 저엔트로피이고 여긴 credential 저장소 아님.\n[close_reason] 단일 사용자 로컬 CLI. login/session/token/credential 경로 없음. 유일한 credential은 cli._driver()의 Neo4j 연결(env)인데 이 변경이 안 건드림 — MODIFIES 엣지·per-commit 계산·churn 채널만 추가.\n[close_reason] 로컬 단일 사용자 도구, 자기 git repo 대상. 네트워크 엔드포인트·멀티테넌트·untrusted submitter·rate-limit 표면 없음. 유일한 input은 repo 자신의 git 이력(diff-tree)이지 adversary 공급 트래픽 아님. git 호출은 list-form(no shell=True), tar는 filter=data.\n[close_reason] 새 코드는 git diff-tree 파일경로·기존 provenance 필드(author, committed_at)·commit SHA만 읽음 — commit 메시지 본문·파일 내용·credential/token/key 안 읽음. Neo4j 비밀번호 경로(cli._driver, env) 미변경. 새 시크릿 싱크 없음.",
+  "created_at": "2026-07-04T05:34:58.606Z",
+  "status": "pending",
+  "sources": [],
+  "confidence_kind": "EXTRACTED",
+  "sensitivity": "internal",
+  "governs": []
+}

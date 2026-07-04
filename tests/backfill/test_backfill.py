@@ -70,6 +70,55 @@ def test_backfill_is_idempotent(db, repo):
     assert _scalar(db, "MATCH (r:Repo) RETURN count(r)") == 1  # still one after re-run
 
 
+SVC_FILE = "CommuteService.java"  # the fixture repo lays the file at its root
+
+
+def test_backfill_binds_modifies_to_each_commits_changed_files(db, repo):
+    """ac-1: every commit's Episode MODIFIES only the File(s) it changed, and the
+    ROOT commit (no parent) is captured too (``--root``) — else the initial import
+    would silently drop the file it introduced."""
+    result = backfill(db, repo)
+
+    # Both commits touched CommuteService.java (root ADDs it, c2 EDITs it), so two
+    # MODIFIES edges land — the root commit among them proves --root captured it.
+    assert result.modifies == 2
+    assert _scalar(
+        db, "MATCH (:Episode)-[r:MODIFIES]->(:File {id:$f}) RETURN count(r)", f=SVC_FILE
+    ) == 2
+
+    # ac-1 grounding: each Episode binds to exactly the one File it changed.
+    with db.session() as session:
+        degrees = sorted(
+            r["d"]
+            for r in session.run(
+                "MATCH (e:Episode) RETURN COUNT { (e)-[:MODIFIES]->() } AS d"
+            )
+        )
+    assert degrees == [1, 1]
+
+    # ac-1: the edge is deterministic, and the ROOT Episode is one of the two.
+    assert _scalar(
+        db,
+        "MATCH (:Episode)-[r:MODIFIES]->(:File {id:$f}) "
+        "WHERE r.edge_kind = 'deterministic' RETURN count(r)", f=SVC_FILE,
+    ) == 2
+
+
+def test_backfill_modifies_is_idempotent_and_head_merge_holds(db, repo):
+    """ac-2: re-backfill converges — no duplicate MODIFIES edges, and File keeps
+    its HEAD-MERGE invariant (one CommuteService.java File, no per-commit versioned
+    code nodes)."""
+    first = backfill(db, repo)
+    files_after_first = _scalar(db, "MATCH (f:File) RETURN count(f)")
+
+    second = backfill(db, repo)
+
+    assert first.modifies == second.modifies == 2
+    assert _scalar(db, "MATCH ()-[r:MODIFIES]->() RETURN count(r)") == 2  # no dup
+    assert _scalar(db, "MATCH (f:File) RETURN count(f)") == files_after_first
+    assert _scalar(db, "MATCH (f:File {id:$f}) RETURN count(f)", f=SVC_FILE) == 1
+
+
 def test_backfill_does_not_mutate_repo(db, repo):
     def status() -> str:
         return subprocess.run(

@@ -53,6 +53,7 @@ from palimpsest.ir import (
     CONTAINS,
     IMPORTS,
     MEMBER_OF,
+    MODIFIES,
     INFERRED_RELATION_TYPES,
     EMBEDDING_DIM,
 )
@@ -993,3 +994,103 @@ def reconcile_recall(driver, symbol, branches, limit=25):
         "conflict_edges": conflict_edges,
         "gaps": [],
     }
+
+
+# ── churn / co-change: the MODIFIES (Episode -> File) recall channels ─────────
+# MODIFIES is deterministic but deliberately ABSENT from DEFAULT_RELATIONS, so an
+# author-bearing Episode is never dragged into ordinary items traversal. These two
+# SEPARATE entry points surface it safely: they NEVER project the Episode (no
+# ``RETURN e`` / ``e.author``) — only the File endpoints, via :func:`_sources`
+# (author omitted), exactly like the summaries / community channels. Ranking is a
+# pure count DESC + total-order (id) tiebreak, so a new / sparse repo degrades
+# gracefully (fewer hotspots) rather than needing a hardcoded count threshold.
+
+# Hotspot Files, ranked by how many DISTINCT commits (Episodes) touched them. ``e``
+# is used ONLY inside ``count(DISTINCT e)`` — never returned, so no author leaks.
+_CHURN = """
+MATCH (f:File)<-[:MODIFIES]-(e:Episode)
+WITH f, count(DISTINCT e) AS churn
+RETURN f.id AS id, labels(f) AS labels, f.name AS name,
+       f.qualified_name AS qualified_name,
+       f.path AS path, f.start_line AS start_line, f.end_line AS end_line,
+       f.source_commit AS source_commit, f.committed_at AS committed_at,
+       churn AS churn
+ORDER BY churn DESC, id
+LIMIT $lim
+"""
+
+# Bound on per-Episode fan-out into co-changed files: a mega-commit touching
+# thousands of files must not blow up the co-change join. The caller's ``limit``
+# bounds the RETURNED rows; this named cap bounds the INTERMEDIATE expansion each
+# Episode contributes (a threshold that must exist gets a named module constant,
+# never a magic literal buried in the query).
+_COCHANGE_FANOUT_CAP = 512
+
+# Files co-changed with the seed File: another File touched by the SAME Episode.
+# ``f2`` is constrained to the seed's OWN branch plane (``coalesce`` handles the
+# bare null plane) so a bare Episode never bridges two branch-scoped planes
+# (mirrors recall_semantic's branch guard). The Episode is again never projected —
+# only File2 endpoints surface. The per-Episode fan-out is capped server-side.
+_COCHANGE = """
+MATCH (f:File {id: $id})<-[:MODIFIES]-(e:Episode)
+CALL {
+    WITH e, f
+    MATCH (e)-[:MODIFIES]->(f2:File)
+    WHERE f2.id <> f.id
+      AND coalesce(f2.branch, '') = coalesce(f.branch, '')
+    RETURN f2 ORDER BY f2.id LIMIT $fanout
+}
+WITH f2, count(DISTINCT e) AS cochange
+RETURN f2.id AS id, labels(f2) AS labels, f2.name AS name,
+       f2.qualified_name AS qualified_name,
+       f2.path AS path, f2.start_line AS start_line, f2.end_line AS end_line,
+       f2.source_commit AS source_commit, f2.committed_at AS committed_at,
+       cochange AS cochange
+ORDER BY cochange DESC, id
+LIMIT $lim
+"""
+
+
+def recall_churn(driver, limit=25):
+    """Recall the churn hotspots — Files ranked by how many commits touched them.
+
+    A SEPARATE, global entry point over the MODIFIES spine. Returns the standard
+    ``{items, sources, summaries, ...}`` shape; each item is a hotspot File
+    (grounded, author-omitted) carrying a ``churn`` count, ordered count DESC with
+    an id tiebreak (deterministic, run-stable) and BOUNDED by ``limit``. An empty
+    MODIFIES graph is an explicit gap, never a crash (graceful-empty). Combinatorial
+    only (one aggregation query + dict building) — no LLM.
+    """
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_CHURN, lim=limit)]
+    items = [_item(rec, MODIFIES, 1) for rec in rows]
+    for it, rec in zip(items, rows):
+        it["churn"] = rec["churn"]
+    gaps = [] if items else ["no MODIFIES edges in the graph — churn recall is empty"]
+    return _result(items, gaps, None, [])
+
+
+def recall_cochange(driver, file_id, limit=25):
+    """Recall the Files that co-changed with ``file_id`` (same-commit co-change).
+
+    A SEPARATE entry point: File2s touched by the SAME Episode as the seed File,
+    ranked by co-change count DESC (id tiebreak), constrained to the seed's own
+    branch plane, BOUNDED by ``limit`` and by a per-Episode fan-out cap. An
+    unresolved seed / no co-change is an explicit gap, never a confident empty
+    answer. The Episode is never projected (author-omitted). Combinatorial only.
+    """
+    with driver.session() as session:
+        if session.run(_RESOLVE, id=file_id).single() is None:
+            gap = f"file '{file_id}' did not resolve to any node in the graph"
+            return _result([], [gap], None, [])
+        rows = [
+            r.data()
+            for r in session.run(
+                _COCHANGE, id=file_id, lim=limit, fanout=_COCHANGE_FANOUT_CAP
+            )
+        ]
+    items = [_item(rec, MODIFIES, 1) for rec in rows]
+    for it, rec in zip(items, rows):
+        it["cochange"] = rec["cochange"]
+    gaps = [] if items else [f"file '{file_id}' has no co-changed files"]
+    return _result(items, gaps, None, [])
