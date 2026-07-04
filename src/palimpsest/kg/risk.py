@@ -1,30 +1,29 @@
-"""Load externally-generated Risk judgments into the KG (provider-free).
+"""외부에서 생성된 Risk 판정을 KG에 적재한다(provider-free).
 
-palimpsest calls NO LLM. A Risk is a judgment ("this code is risky") produced by
-an external generator and handed to :func:`load_risks` for grounded, idempotent
-load. Like the Summary inferred layer, it is kept SEPARATE from the deterministic
-structural layer by two markers:
+palimpsest는 LLM을 전혀 호출하지 않는다. Risk는 외부 생성기가 내놓은 판정("이 코드는
+위험하다")으로, 근거결박되고 멱등(idempotent)한 적재를 위해 :func:`load_risks`에
+넘겨진다. Summary inferred 층과 마찬가지로, 두 개의 표식으로 결정론적 구조층과
+분리(SEPARATE)를 유지한다:
 
-  * node label ``Risk`` (never a code label), and
-  * ``edge_kind = "inferred"`` on every ``RISKS`` edge (deterministic edges are
-    ``"deterministic"``) — the schema-enforced no-laundering separation.
+  * 노드 라벨 ``Risk`` (코드 라벨은 절대 아님), 그리고
+  * 모든 ``RISKS`` 엣지의 ``edge_kind = "inferred"`` (결정론적 엣지는
+    ``"deterministic"``) — 스키마가 강제하는 no-laundering 분리.
 
-Grounding (entity-atomic). A Risk must flag >=1 code node id, and every flag must
-resolve to a real graph node. A Risk with zero flags, or any unresolved flag, is
-REJECTED with a reason — never a floating judgment node, never partially loaded.
-Rejecting one Risk does not stop the rest. The deterministic ``_REL_MERGE`` writer
-is deliberately NOT reused: it stamps ``edge_kind='deterministic'`` (which would
-launder this inferred layer) and its ``MATCH..MATCH..MERGE`` would silently no-op
-on an unresolved endpoint; here every flag is resolved up front and mismatches are
-rejected.
+근거결박(entity-atomic). Risk는 1개 이상의 코드 노드 id를 flag해야 하고, 모든 flag는
+실제 그래프 노드로 resolve돼야 한다. flag가 0개이거나 resolve되지 않는 flag가 하나라도
+있는 Risk는 이유와 함께 REJECT한다 — 떠도는(floating) 판정 노드도, 부분 적재도 없다.
+Risk 하나를 거절해도 나머지는 멈추지 않는다. 결정론적 ``_REL_MERGE`` writer는 일부러
+재사용하지 않는다: 그것은 ``edge_kind='deterministic'``를 찍고(이 inferred 층을
+laundering하게 된다), 그 ``MATCH..MATCH..MERGE``는 resolve되지 않는 endpoint에서
+조용히 no-op이 된다; 여기서는 모든 flag를 미리 resolve하고 불일치는 거절한다.
 
-Idempotence. The Risk id is deterministic and namespace-isolated
-(``risk:<hash>`` — a code ``qualified_name`` can never collide), and every write
-is MERGE-on-id, so re-loading the same payload changes nothing.
+멱등(idempotence). Risk id는 결정론적이고 네임스페이스로 격리돼 있으며
+(``risk:<hash>`` — 코드 ``qualified_name``과 절대 충돌할 수 없다), 모든 쓰기가
+MERGE-on-id라서 같은 payload를 다시 적재해도 아무것도 바뀌지 않는다.
 
-Freshness. ``code_bound_at`` binds to a flagged code node's ``committed_at``
-(freshness follows the code, not the generator's wall-clock). ``created_at`` is
-the external generation time carried on the payload.
+신선도(freshness). ``code_bound_at``은 flag된 코드 노드의 ``committed_at``에 결박된다
+(신선도는 생성기의 벽시계가 아니라 코드를 따른다). ``created_at``은 payload에 실려 온
+외부 생성 시각이다.
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ from palimpsest.ir import EDGE_KIND_INFERRED, Risk
 
 @dataclass(frozen=True)
 class RiskRejection:
-    """A refused Risk and why — surfaced, never swallowed."""
+    """거절된 Risk와 그 이유 — 삼키지 않고 드러낸다."""
 
     risk_id: str
     reason: str
@@ -46,7 +45,7 @@ class RiskRejection:
 
 @dataclass(frozen=True)
 class RiskLoadResult:
-    """Outcome of a load batch: counts + the explicit rejection reasons."""
+    """적재 배치의 결과: 집계 수치 + 명시적 거절 이유."""
 
     intended: int
     loaded: int
@@ -55,21 +54,21 @@ class RiskLoadResult:
 
 
 def risk_id(title: str, source_commit: str, flags) -> str:
-    """Deterministic, namespace-isolated Risk id.
+    """결정론적이고 네임스페이스로 격리된 Risk id.
 
-    Built over a rebuild-stable key — the NUL-joined normalized ``title``,
-    ``source_commit`` and SORTED ``flags`` — so the id is invariant under flag
-    order (mirrors :func:`palimpsest.kg.community.community_id`). The ``risk:``
-    prefix guarantees it can never equal a code ``qualified_name``, so a Risk
-    never shadows a code node; the hash makes re-load idempotent.
+    rebuild-stable한 키 위에서 만든다 — 정규화된 ``title``, ``source_commit``,
+    그리고 SORTED된 ``flags``를 NUL로 이어붙인 것 — 이라서 id는 flag 순서에
+    무관하다(:func:`palimpsest.kg.community.community_id`와 동일). ``risk:``
+    프리픽스는 id가 코드 ``qualified_name``과 절대 같아질 수 없음을 보장하므로,
+    Risk는 코드 노드를 절대 가리지(shadow) 않는다; hash가 재적재를 멱등하게 만든다.
     """
     raw = "\x00".join([title.strip(), source_commit, *sorted(flags)])
     return "risk:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-# Label ("Risk") and rel type ("RISKS") are closed constants baked into the query
-# text; every piece of Risk DATA (id, title, flags, provenance) rides in as
-# ``$params`` so adversarial title text is inert.
+# 라벨("Risk")과 rel type("RISKS")은 쿼리 텍스트에 박아 넣은 닫힌 상수다; Risk의
+# 모든 DATA(id, title, flags, provenance)는 ``$params``로 실려 들어오므로 적대적인
+# title 텍스트는 무력하다.
 _RISK_MERGE = """
 MERGE (r:Risk {id: $id})
 SET r.title         = $title,
@@ -99,8 +98,8 @@ SET e.edge_kind     = $edge_kind,
 
 
 def _structural_reject_reason(risk: Risk):
-    """A reason the Risk is malformed on its face, or None if well-formed
-    (grounding of flags is checked separately, against the live graph)."""
+    """Risk가 겉보기에 잘못된 이유, 또는 형식이 온전하면 None
+    (flag의 근거결박은 live 그래프를 대상으로 별도로 검사한다)."""
     if not (risk.generator and risk.generator.strip()):
         return "missing generator"
     if not (risk.model and risk.model.strip()):
@@ -129,8 +128,8 @@ def _committed_at(session, node_id: str):
 
 
 def _write(session, rid: str, risk: Risk, flags, code_bound_at) -> None:
-    # Neo4j properties are primitives/arrays, not maps, so an external judge's
-    # verdict is stored as a JSON string (recall parses it back).
+    # Neo4j 속성은 map이 아니라 primitive/array라서, 외부 judge의 verdict는
+    # JSON 문자열로 저장한다(recall에서 다시 파싱한다).
     semantic_verdict = (
         json.dumps(risk.semantic_verdict, ensure_ascii=False)
         if risk.semantic_verdict is not None
@@ -164,7 +163,7 @@ def _write(session, rid: str, risk: Risk, flags, code_bound_at) -> None:
 
 
 def load_risks(driver, risks) -> RiskLoadResult:
-    """Load externally-generated Risks into the inferred KG layer."""
+    """외부에서 생성된 Risk를 inferred KG 층에 적재한다."""
     risks = list(risks)
     rejections: list[RiskRejection] = []
     loaded = 0
@@ -178,9 +177,9 @@ def load_risks(driver, risks) -> RiskLoadResult:
                 rejections.append(RiskRejection(rid, reason))
                 continue
 
-            # Grounding, resolved up front (never a silent MATCH..MERGE no-op): a
-            # flag that does not resolve rejects the WHOLE Risk (entity-atomic),
-            # so no floating judgment node and no partial write.
+            # 근거결박은 미리 resolve한다(조용한 MATCH..MERGE no-op 없음): resolve되지
+            # 않는 flag가 하나라도 있으면 Risk 전체를 거절하므로(entity-atomic),
+            # 떠도는 판정 노드도 부분 쓰기도 없다.
             unresolved = sorted(set(flags) - _resolve(session, flags))
             if unresolved:
                 rejections.append(
@@ -188,12 +187,12 @@ def load_risks(driver, risks) -> RiskLoadResult:
                 )
                 continue
 
-            # anchor freshness on the deterministically-first flag's code node.
-            # NOTE: this binds the node AND every RISKS edge to flags[0]'s commit
-            # (not each flag's own) — a known simplification (mirrors Summary's
-            # single-anchor); harmless while single-flag, and no consumer reads
-            # per-edge Risk freshness yet (no risk recall channel). See the ADR
-            # change_condition ("multi-flag 신선도 재검토").
+            # 신선도를 결정론적으로 첫 번째인 flag의 코드 노드에 앵커한다.
+            # NOTE: 이는 노드와 모든 RISKS 엣지를 flags[0]의 commit에 결박한다
+            # (각 flag 고유의 것이 아니라) — 알려진 단순화(Summary의 single-anchor와
+            # 동일); single-flag인 동안은 무해하고, 아직 per-edge Risk 신선도를 읽는
+            # 소비자가 없다(risk recall 채널 없음). ADR change_condition
+            # ("multi-flag 신선도 재검토") 참조.
             _write(session, rid, risk, flags, _committed_at(session, flags[0]))
             loaded += 1
     return RiskLoadResult(

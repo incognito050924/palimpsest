@@ -1,7 +1,7 @@
-"""palimpsest — project-lifecycle memory & knowledge curator.
+"""palimpsest — 프로젝트 생애주기 메모리 및 지식 큐레이터.
 
-Seed stage: identity and locked decisions live in docs/VISION.md.
-No runtime behavior yet — see VISION §"다음 단계" for the first spike.
+씨앗 단계: 정체성과 확정된 결정은 docs/VISION.md에 있다.
+아직 런타임 동작은 없다 — 첫 스파이크는 VISION §"다음 단계" 참고.
 """
 
 __version__ = "0.0.0"

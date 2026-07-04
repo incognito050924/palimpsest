@@ -1,20 +1,20 @@
-"""Community detection at the Class level (deterministic, provider-free).
+"""Class 단위 Community 탐지 (결정론적, provider-free).
 
-A Community is a connected component of Classes, where two Classes are connected
-iff there is a cross-class edge between them in the RESOLVED deterministic IR:
+Community는 Class들의 연결 요소(connected component)다. 두 Class는 RESOLVED된
+결정론적 IR에서 둘 사이에 cross-class 엣지가 있을 때만(iff) 연결된 것으로 본다:
 
-  * a ``DEPENDS_ON`` (Class -> Class), or
-  * a ``CALLS`` (Method -> Method) lifted to its declaring Classes via the
-    ``Class-[CONTAINS]->Method`` edge (self-edges — same declaring class — dropped).
+  * ``DEPENDS_ON`` (Class -> Class), 또는
+  * ``CALLS`` (Method -> Method)를 ``Class-[CONTAINS]->Method`` 엣지를 통해
+    선언 Class로 끌어올린 것(self-edge — 같은 선언 Class — 은 버린다).
 
-The partition is EXCLUSIVE and FLAT: every Class lands in exactly one Community,
-an isolated Class forming its own singleton. Detection is pure Python
-(union-find) over the IR — no GDS, no LLM.
+이 분할은 배타적(EXCLUSIVE)이고 평면적(FLAT)이다: 모든 Class는 정확히 하나의
+Community에 속하며, 고립된 Class는 자기 자신만으로 singleton을 이룬다. 탐지는
+IR 위에서 순수 Python(union-find)으로 한다 — GDS 없음, LLM 없음.
 
-Reconciliation is *materialize-in-IR*: :func:`augment_communities` appends the
-``Community`` nodes and ``Class-[MEMBER_OF]->Community`` edges to the IR so the
-generic ``ingest`` writers persist and provenance-stamp them like any other
-node/edge (``edge_kind='deterministic'`` is set automatically).
+Reconcile는 *materialize-in-IR* 방식이다: :func:`augment_communities`가
+``Community`` 노드와 ``Class-[MEMBER_OF]->Community`` 엣지를 IR에 덧붙여, 일반
+``ingest`` writer가 다른 노드/엣지와 똑같이 이들을 영속화하고 provenance를 찍게
+한다(``edge_kind='deterministic'``는 자동으로 설정된다).
 """
 
 from __future__ import annotations
@@ -37,22 +37,22 @@ from palimpsest.ir import (
 
 
 def community_id(members) -> str:
-    """Deterministic, namespace-isolated Community id.
+    """결정론적이고 네임스페이스로 격리된 Community id.
 
-    ``raw`` is the NUL-joined sorted member Class qualified_names, so the id is
-    invariant under member order — rebuild-stable (ac-3). The ``community:``
-    prefix guarantees it can never collide with a code ``qualified_name``.
-    Mirrors :func:`palimpsest.kg.summary.summary_id`.
+    ``raw``는 정렬된 멤버 Class qualified_name들을 NUL로 이어붙인 것이라, id는
+    멤버 순서에 무관하다 — rebuild-stable(ac-3). ``community:`` 프리픽스는 id가
+    코드 ``qualified_name``과 절대 충돌하지 않음을 보장한다.
+    :func:`palimpsest.kg.summary.summary_id`와 동일한 방식이다.
     """
     raw = "\x00".join(sorted(members))
     return "community:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _class_of_method(ir: IR) -> dict[str, str]:
-    """Map each Method qualified_name to its declaring Class via CONTAINS.
+    """CONTAINS를 통해 각 Method qualified_name을 그 선언 Class로 매핑한다.
 
-    CONTAINS is overloaded (Repo->Package and Class->Method); we keep only the
-    Class->Method edges by checking both endpoints against the node index.
+    CONTAINS는 오버로드되어 있다(Repo->Package와 Class->Method); 양쪽 endpoint를
+    노드 색인과 대조해 Class->Method 엣지만 남긴다.
     """
     class_ids = {n.qualified_name for n in ir.nodes_of(CLASS)}
     method_ids = {n.qualified_name for n in ir.nodes_of(METHOD)}
@@ -64,8 +64,8 @@ def _class_of_method(ir: IR) -> dict[str, str]:
 
 
 def _class_level_pairs(ir: IR) -> set[frozenset]:
-    """Undirected cross-class links: DEPENDS_ON (Class->Class) plus CALLS lifted
-    to declaring Classes (self-links dropped). Inputs are the RESOLVED IR edges."""
+    """무방향 cross-class 링크: DEPENDS_ON(Class->Class)에, 선언 Class로 끌어올린
+    CALLS를 더한 것(self-link은 버린다). 입력은 RESOLVED된 IR 엣지들이다."""
     class_ids = {n.qualified_name for n in ir.nodes_of(CLASS)}
     m2c = _class_of_method(ir)
     pairs: set[frozenset] = set()
@@ -80,10 +80,10 @@ def _class_level_pairs(ir: IR) -> set[frozenset]:
 
 
 def compute_communities(ir: IR) -> list[list[str]]:
-    """Partition the IR's Classes into connected components (union-find).
+    """IR의 Class들을 연결 요소로 분할한다(union-find).
 
-    Returns a deterministically-ordered list of Communities, each a sorted list
-    of member Class qualified_names. Every Class appears in exactly one.
+    결정론적으로 정렬된 Community 목록을 반환한다. 각 Community는 멤버 Class
+    qualified_name을 정렬한 리스트다. 모든 Class는 정확히 하나에만 나타난다.
     """
     class_ids = sorted(n.qualified_name for n in ir.nodes_of(CLASS))
     parent = {c: c for c in class_ids}
@@ -97,8 +97,8 @@ def compute_communities(ir: IR) -> list[list[str]]:
     def union(a: str, b: str) -> None:
         ra, rb = find(a), find(b)
         if ra != rb:
-            # Attach the lexicographically-larger root under the smaller so the
-            # component root is order-independent (rebuild-stable).
+            # 사전순으로 더 큰 root를 더 작은 root 아래에 붙여, 요소의 root가
+            # 순서에 무관하도록(rebuild-stable) 만든다.
             parent[max(ra, rb)] = min(ra, rb)
 
     for pair in _class_level_pairs(ir):
@@ -112,12 +112,12 @@ def compute_communities(ir: IR) -> list[list[str]]:
 
 
 def augment_communities(ir: IR, provenance: Provenance) -> IR:
-    """Materialize the Class-level Community partition into ``ir`` (in place).
+    """Class 단위 Community 분할을 ``ir``에 materialize한다(제자리에서).
 
-    Appends one ``Community`` node per component and a ``Class-[MEMBER_OF]->
-    Community`` edge per member, each stamped with the corpus-level
-    ``provenance`` (Community nodes carry no path/line grounding, like Repo /
-    Package). The existing ``ingest`` then persists them generically.
+    요소마다 ``Community`` 노드 하나를, 멤버마다 ``Class-[MEMBER_OF]->
+    Community`` 엣지 하나를 덧붙인다. 각각에는 corpus 단위 ``provenance``를
+    찍는다(Community 노드는 Repo / Package처럼 path/line 근거를 갖지 않는다).
+    이후 기존 ``ingest``가 이들을 일반적으로 영속화한다.
     """
     for members in compute_communities(ir):
         cid = community_id(members)

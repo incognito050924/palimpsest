@@ -1,16 +1,16 @@
-"""Backfill the FULL git history into the KG (provider-free, deterministic).
+"""전체 git 이력을 KG에 backfill한다(provider-free, 결정론적).
 
-The single-commit ingest (``cli._cmd_ingest``) projects one pinned commit. Backfill
-replays that SAME extract -> ingest pipeline over EVERY commit, oldest -> newest, so
-the deterministic projection reflects the whole history: every commit lands as an
-``Episode`` and each code node's freshness (``committed_at``) ends up bound to the
-NEWEST commit that touched it (``ingest`` MERGEs by id with an unconditional SET, so
-the last write in oldest->newest order wins).
+단일 커밋 ingest(``cli._cmd_ingest``)는 pin된 커밋 하나를 projection한다. Backfill은
+바로 그 extract -> ingest 파이프라인을 모든(EVERY) 커밋에 oldest -> newest로 재생해,
+결정론적 projection이 전체 이력을 반영하게 한다: 모든 커밋이 ``Episode``로 안착하고,
+각 코드 노드의 freshness(``committed_at``)는 그 노드를 건드린 가장 최신(NEWEST) 커밋에
+결박된다(``ingest``가 무조건적 SET으로 id 기준 MERGE하므로, oldest->newest 순서에서
+마지막 쓰기가 이긴다 — last-write-wins).
 
-Each commit's tree is materialized into a FRESH temp dir via ``git archive`` (piped
-through stdlib ``tarfile``) — never ``git checkout`` — so the working tree and HEAD
-of ``repo_path`` are left untouched. Pure git + extract + ingest: no LLM, no network
-beyond git and Neo4j. Re-running is idempotent (MERGE-on-id).
+각 커밋의 트리는 ``git archive``(stdlib ``tarfile``로 파이핑)를 통해 새(FRESH) 임시
+디렉터리에 실체화된다 — ``git checkout``은 절대 쓰지 않는다 — 따라서 ``repo_path``의
+작업 트리와 HEAD는 손대지 않는다. 순수 git + extract + ingest: LLM 없고, git과 Neo4j
+외의 네트워크도 없다. 재실행은 멱등(idempotent)이다(MERGE-on-id).
 """
 
 from __future__ import annotations
@@ -34,24 +34,24 @@ from palimpsest.kg import (
 
 @dataclass(frozen=True)
 class BackfillResult:
-    """What a backfill run projected.
+    """backfill 실행이 projection한 것.
 
-    ``commits`` is the number of commits replayed (oldest -> newest). ``nodes`` /
-    ``edges`` are the IR sizes of the NEWEST commit — the HEAD projection — not a
-    cross-commit sum (a sum would double-count nodes that MERGE dedups by id).
+    ``commits``는 재생된 커밋 수(oldest -> newest)다. ``nodes`` / ``edges``는 가장
+    최신(NEWEST) 커밋의 IR 크기 — HEAD projection — 이며, 커밋 간 합이 아니다(합을
+    내면 MERGE가 id 기준으로 dedup하는 노드를 이중 계산하게 된다).
     """
 
     commits: int
     nodes: int = 0
     edges: int = 0
-    # Total Episode -[:MODIFIES]-> File edges landed across the whole replay (a
-    # cross-commit sum, unlike ``nodes``/``edges`` which are the HEAD IR sizes):
-    # MODIFIES is a per-commit fact, so every commit contributes its own edges.
+    # 전체 재생에 걸쳐 안착한 Episode -[:MODIFIES]-> File 엣지의 총합(HEAD IR 크기인
+    # ``nodes``/``edges``와 달리 커밋 간 합이다): MODIFIES는 커밋별 사실이므로 모든
+    # 커밋이 각자의 엣지를 기여한다.
     modifies: int = 0
 
 
 def _commits_oldest_first(repo_path: str) -> list[str]:
-    """Full SHA list, oldest -> newest. Empty repo / no commits -> ``[]``."""
+    """전체 SHA 목록, oldest -> newest. 빈 repo / 커밋 없음 -> ``[]``."""
     out = subprocess.run(
         ["git", "-C", repo_path, "log", "--format=%H", "--reverse"],
         check=False, capture_output=True, text=True,
@@ -60,11 +60,11 @@ def _commits_oldest_first(repo_path: str) -> list[str]:
 
 
 def _materialize_tree(repo_path: str, sha: str, dest: str) -> None:
-    """Extract ``sha``'s tree into ``dest`` WITHOUT touching the working tree.
+    """작업 트리를 건드리지 않고(WITHOUT) ``sha``의 트리를 ``dest``로 추출한다.
 
-    ``git archive`` streams a tar of the pinned tree to stdout; stdlib ``tarfile``
-    unpacks it — no ``git checkout``, so ``repo_path``'s HEAD/working tree are
-    untouched (backfill is read-only against the source repo).
+    ``git archive``가 pin된 트리의 tar를 stdout으로 스트리밍하면 stdlib ``tarfile``이
+    풀어낸다 — ``git checkout``이 없으므로 ``repo_path``의 HEAD/작업 트리는 손대지
+    않는다(backfill은 소스 repo에 대해 읽기 전용이다).
     """
     archive = subprocess.run(
         ["git", "-C", repo_path, "archive", "--format=tar", sha],
@@ -75,20 +75,20 @@ def _materialize_tree(repo_path: str, sha: str, dest: str) -> None:
 
 
 def backfill(driver, repo_path: Path | str) -> BackfillResult:
-    """Replay extract -> ingest over every commit, oldest -> newest.
+    """extract -> ingest를 모든 커밋에 oldest -> newest로 재생한다.
 
-    Idempotent (MERGE-on-id) and provider-free (pure git + extract + ingest).
+    멱등(idempotent, MERGE-on-id)이며 provider-free(순수 git + extract + ingest)다.
     """
     repo_path = str(repo_path)
     shas = _commits_oldest_first(repo_path)
     if not shas:
         return BackfillResult(commits=0)
 
-    # Stable Repo id across commits: each commit is materialized into a DIFFERENT
-    # temp dir, so extract's default ``repo_name = root.name`` would vary per
-    # commit and mint a fresh Repo node each time. Pin it to the source repo's
-    # name so all commits project into the SAME Repo (and match single-commit
-    # ingest, which passes the real repo path).
+    # 커밋 간 안정적인 Repo id: 각 커밋은 서로 다른(DIFFERENT) 임시 디렉터리에
+    # 실체화되므로, extract의 기본값 ``repo_name = root.name``은 커밋마다 달라져
+    # 매번 새 Repo 노드를 찍어낸다. 이를 소스 repo의 이름으로 pin해 모든 커밋이
+    # 같은(SAME) Repo로 projection되게 한다(그리고 실제 repo 경로를 넘기는 단일 커밋
+    # ingest와 일치시킨다).
     repo_name = Path(repo_path).resolve().name
 
     create_constraints(driver)
@@ -100,11 +100,11 @@ def backfill(driver, repo_path: Path | str) -> BackfillResult:
             ir = extract(tmp, prov, repo_name=repo_name)
             augment_communities(ir, prov)
             ingest(driver, ir)
-            # MODIFIES: bind this commit's Episode to only the File(s) it changed.
-            # File ids share the bare (branch=None) plane backfill projects into, so
-            # ``branch_scoped_id(None, path) == path`` — the SAME identity fn the
-            # File nodes use, keeping endpoints consistent (a deleted path resolves
-            # to no File node and is skipped by the writer's MATCH, never a phantom).
+            # MODIFIES: 이 커밋의 Episode를 그 커밋이 변경한 File에만 결박한다.
+            # File id는 backfill이 projection하는 bare(branch=None) plane을 공유하므로
+            # ``branch_scoped_id(None, path) == path`` — File 노드가 쓰는 것과 같은(SAME)
+            # 정체성 함수여서 엔드포인트가 일관된다(삭제된 경로는 어떤 File 노드에도
+            # 해석되지 않아 라이터의 MATCH에서 건너뛰어지며, phantom이 되지 않는다).
             rows = [
                 {"episode_id": sha, "file_id": branch_scoped_id(None, path),
                  "committed_at": prov.committed_at}

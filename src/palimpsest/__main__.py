@@ -1,4 +1,4 @@
-"""``python -m palimpsest`` entry point."""
+"""``python -m palimpsest`` 진입점."""
 
 import sys
 

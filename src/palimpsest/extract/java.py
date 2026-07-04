@@ -1,8 +1,8 @@
-"""Static extraction of Java source into the palimpsest IR.
+"""Java 소스를 palimpsest IR로 정적 추출한다.
 
-Parser: tree-sitter-java (py-tree-sitter). Deterministic structural ontology only;
-CALLS is name-based best-effort (no full type resolution) and Lombok-generated
-members are invisible to a source parser — both acceptable for v1.
+파서: tree-sitter-java (py-tree-sitter). 결정론적 구조 온톨로지만 다룬다.
+CALLS는 단순명 기반 best-effort(전체 타입 해석 없음)이고, Lombok이 생성한
+멤버는 소스 파서에 보이지 않는다 — 둘 다 v1에서는 수용 가능하다.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _line(point) -> int:
 
 
 def _simple_type_name(node: TSNode | None) -> str | None:
-    """Base (unqualified, un-generic) reference-type name, or None for primitives."""
+    """기저(비수식·비제네릭) 참조 타입명, 원시 타입이면 None."""
     if node is None:
         return None
     t = node.type
@@ -50,7 +50,7 @@ def _simple_type_name(node: TSNode | None) -> str | None:
                 return r
         return None
     # void_type / boolean_type / integral_type / floating_point_type / ...
-    return None
+    return None  # 원시 타입은 참조 타입명이 없다
 
 
 def _param_types(method: TSNode) -> list[str]:
@@ -64,7 +64,7 @@ def _param_types(method: TSNode) -> list[str]:
         t = fp.child_by_field_name("type")
         name = _simple_type_name(t)
         if name is None and t is not None:
-            name = t.text.decode()  # primitive (boolean, int, void, ...)
+            name = t.text.decode()  # 원시 타입 (boolean, int, void, ...)
         out.append(name or "?")
     return out
 
@@ -77,7 +77,7 @@ def _package_fqn(root: TSNode) -> str:
 
 
 class _FileWalker:
-    """Collects nodes + edges for a single parsed Java file."""
+    """파싱된 Java 파일 하나에서 노드 + 엣지를 수집한다."""
 
     def __init__(self, rel_path: str, source: bytes, root: TSNode, prov: Provenance):
         self.rel_path = rel_path
@@ -87,14 +87,14 @@ class _FileWalker:
         self.pkg = _package_fqn(root)
         self.nodes: list[Node] = []
         self.edges: list[Edge] = []
-        # class fqn -> tree-sitter body node (for later edge slices)
+        # class fqn -> tree-sitter body 노드 (이후 엣지 슬라이스용)
         self.class_bodies: dict[str, TSNode] = {}
-        # class fqn -> referenced simple type names (fields + params + imports)
+        # class fqn -> 참조된 단순 타입명 (필드 + 파라미터 + import)
         self.class_refs: dict[str, set[str]] = {}
-        # simple names of single-type imports in this file (attributed to its classes)
+        # 이 파일의 단일 타입 import들의 단순명 (파일 내 클래스에 귀속)
         self.import_simple: set[str] = set()
         self.file_classes: list[str] = []
-        # method fqn -> simple names invoked in its body (for name-based CALLS)
+        # method fqn -> 본문에서 호출한 단순명 (단순명 기반 CALLS용)
         self.method_calls: dict[str, set[str]] = {}
 
     def _edge(self, kind: str, src: str, dst: str) -> None:
@@ -115,13 +115,13 @@ class _FileWalker:
         # Package -> File
         if self.pkg:
             self._edge(CONTAINS, self.pkg, self.rel_path)
-        # imports + top-level type declarations
+        # import + 최상위 타입 선언
         for child in self.root.named_children:
             if child.type == "import_declaration":
                 self._import_decl(child)
             elif child.type in _TYPE_DECLS:
                 self._type_decl(child, enclosing_fqn=None, container_id=self.rel_path)
-        # imported types count as dependencies of every class declared in the file
+        # import된 타입은 이 파일에 선언된 모든 클래스의 의존으로 친다
         for fqn in self.file_classes:
             self.class_refs[fqn].update(self.import_simple)
 
@@ -132,8 +132,8 @@ class _FileWalker:
             if c.type in ("scoped_identifier", "identifier"):
                 target = c.text.decode()
         if target:
-            # File IMPORTS the referenced qualified name (a Class for single-type
-            # imports, a Package for `a.b.*`). Resolution is by node-id match.
+            # File이 참조된 수식명을 IMPORTS한다 (단일 타입 import면 Class,
+            # `a.b.*`면 Package). 해석은 node-id 매칭으로 한다.
             self._edge(IMPORTS, self.rel_path, target)
             if not wildcard:
                 self.import_simple.add(target.split(".")[-1])
@@ -160,7 +160,7 @@ class _FileWalker:
                 end_line=_line(node.end_point),
             )
         )
-        # container (File or enclosing Class) CONTAINS this Class
+        # 컨테이너(File 또는 감싸는 Class)가 이 Class를 CONTAINS한다
         self._edge(CONTAINS, container_id, fqn)
         self.file_classes.append(fqn)
         self.class_refs.setdefault(fqn, set())
@@ -187,7 +187,7 @@ class _FileWalker:
         param_type_names = _param_types(node)
         params = ",".join(param_type_names)
         fqn = f"{class_fqn}#{name}({params})"
-        # parameter types are dependencies of the declaring class
+        # 파라미터 타입은 선언한 클래스의 의존이다
         for ref in param_type_names:
             if ref and ref != "?":
                 self.class_refs.setdefault(class_fqn, set()).add(ref)
@@ -207,7 +207,7 @@ class _FileWalker:
 
 
 def _collect_call_names(method: TSNode) -> set[str]:
-    """Simple method names invoked anywhere in ``method``'s subtree."""
+    """``method`` 서브트리 어디에서든 호출된 단순 메서드명들."""
     names: set[str] = set()
     stack = [method]
     while stack:
@@ -247,10 +247,10 @@ def _depends_on_edges(
 def _calls_edges(
     nodes: list[Node], method_calls: dict[str, set[str]], prov: Provenance
 ) -> list[Edge]:
-    # Index Method nodes by simple name. CALLS is name-based best-effort: a call
-    # to `foo(...)` links to every known method named `foo`. Self-loops (a name
-    # equal to the caller's own) are suppressed — with no type resolution they are
-    # the most likely false positive.
+    # Method 노드를 단순명으로 색인한다. CALLS는 단순명 기반 best-effort다:
+    # `foo(...)` 호출은 `foo`라는 이름의 알려진 모든 메서드로 연결된다.
+    # 자기 루프(호출자 자신과 같은 이름)는 억제한다 — 타입 해석이 없으면
+    # 가장 흔한 오탐이기 때문이다.
     by_simple = _index_by_simple_name(nodes, METHOD)
     seen: set[tuple[str, str]] = set()
     out: list[Edge] = []
@@ -271,10 +271,10 @@ def _iter_java_files(root: Path):
 
 
 def extract(root: Path | str, provenance: Provenance, repo_name: str | None = None) -> IR:
-    """Parse every ``*.java`` file under ``root`` into an :class:`IR`.
+    """``root`` 아래의 모든 ``*.java`` 파일을 :class:`IR`로 파싱한다.
 
-    ``root`` is treated as the repository root; File node paths are recorded
-    repo-relative to it. Every node and edge carries ``provenance``.
+    ``root``를 저장소 루트로 취급한다. File 노드 경로는 이 루트 기준
+    repo-상대 경로로 기록한다. 모든 노드와 엣지는 ``provenance``를 지닌다.
     """
     root = Path(root)
     repo_name = repo_name or root.name
@@ -300,13 +300,13 @@ def extract(root: Path | str, provenance: Provenance, repo_name: str | None = No
             class_refs.setdefault(fqn, set()).update(refs)
         method_calls.update(walker.method_calls)
 
-    # DEPENDS_ON (Class->Class): resolve referenced simple type names against
-    # known classes by unqualified name (best-effort, no full type resolution).
+    # DEPENDS_ON (Class->Class): 참조된 단순 타입명을 알려진 클래스들의
+    # 비수식명과 맞춰 해석한다 (best-effort, 전체 타입 해석 없음).
     edges.extend(_depends_on_edges(nodes, class_refs, provenance))
-    # CALLS (Method->Method): name-based best-effort resolution.
+    # CALLS (Method->Method): 단순명 기반 best-effort 해석.
     edges.extend(_calls_edges(nodes, method_calls, provenance))
 
-    # Repo node + Package nodes + Repo->Package CONTAINS
+    # Repo 노드 + Package 노드들 + Repo->Package CONTAINS
     repo = Node(kind=REPO, qualified_name=repo_name, name=repo_name, provenance=provenance)
     repo_and_pkgs: list[Node] = [repo]
     repo_edges: list[Edge] = []

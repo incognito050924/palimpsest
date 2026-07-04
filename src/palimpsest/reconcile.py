@@ -1,28 +1,26 @@
-"""N-way branch capture: project several branches' full histories into the KG.
+"""N-way branch capture: 여러 branch의 전체 이력을 KG에 projection한다.
 
-Backfill (:mod:`palimpsest.backfill`) replays extract -> ingest over ONE line of
-history into the bare-id plane. Reconcile generalizes that to N branches so
-divergent versions of the SAME symbol coexist as distinct, comparable nodes
-(ac-1) without collapsing — each branch gets its own identity namespace
-(``scope_to_branch``) folded into the MERGE key.
+Backfill(:mod:`palimpsest.backfill`)은 extract -> ingest를 이력 한(ONE) 갈래에 대해
+bare-id plane으로 재생한다. Reconcile은 이를 N개 branch로 일반화해, 같은(SAME) 심볼의
+갈라진 버전들이 뭉개지지 않고 구별되는·비교 가능한 노드로 공존하게 한다(ac-1) — 각
+branch는 MERGE 키에 접히는 자기만의 정체성 네임스페이스(``scope_to_branch``)를 가진다.
 
-Design invariants (provider-free — no LLM, no network beyond git + Neo4j):
+설계 불변식(provider-free — LLM 없고, git + Neo4j 외의 네트워크도 없다):
 
-  * Dedup the EXTRACT axis, never the HISTORY axis. The UNION of commits is
-    enumerated once (``git rev-list --reverse --date-order``) and each unique tree
-    is materialized + extracted ONCE; the resulting IR is then scoped + ingested
-    once per branch that contains the commit (membership fan-out). Full per-branch
-    history is preserved (every reachable commit lands as an Episode) — merge-base
-    truncation is rejected (ac-5).
-  * scoped-rebuild (delete-then-project): each specified branch's plane is wiped
-    ONCE up front (``wipe_branch_plane``) so shrink/rebase/tip-move leave no stale
-    nodes. The bare-id plane is never touched (ac-6).
-  * Partial-capture honesty: a ``CaptureManifest`` per branch flips to
-    ``captured`` only AFTER all its commits ingest — a mid-run failure leaves it
-    ``pending`` (never silently captured).
-  * Fail-closed: a shallow repository is refused before any extract (a truncated
-    graph is never persisted). Branch args are git-safe (validated, never parsed
-    as git options) and deduped.
+  * EXTRACT 축은 dedup하되, HISTORY 축은 절대 dedup하지 않는다. 커밋의 합집합(UNION)을
+    한 번 열거하고(``git rev-list --reverse --date-order``) 각 고유 트리를 한 번(ONCE)
+    실체화 + 추출한다; 그렇게 나온 IR을 그 커밋을 포함하는 branch마다 한 번씩 scope +
+    ingest한다(membership fan-out). branch별 전체 이력이 보존된다(도달 가능한 모든
+    커밋이 Episode로 안착) — merge-base 절단은 거부된다(ac-5).
+  * scoped-rebuild(delete-then-project): 지정된 각 branch의 plane을 처음에 한 번(ONCE)
+    비운다(``wipe_branch_plane``). 그래서 shrink/rebase/tip-move가 낡은 노드를 남기지
+    않는다. bare-id plane은 절대 건드리지 않는다(ac-6).
+  * 부분 capture 정직성: branch별 ``CaptureManifest``는 그 branch의 모든 커밋이 ingest된
+    뒤에만(AFTER) ``captured``로 뒤집힌다 — 실행 도중 실패하면 ``pending``으로 남는다
+    (조용히 captured되지 않는다).
+  * fail-closed: shallow repository는 어떤 extract보다 먼저 거부된다(절단된 그래프는
+    절대 영속되지 않는다). branch 인자는 git-safe하고(검증되며, git 옵션으로 절대
+    파싱되지 않음) dedup된다.
 """
 
 from __future__ import annotations
@@ -43,18 +41,18 @@ from palimpsest.kg.ingest import (
     wipe_branch_plane,
 )
 
-# Unit Separator — joins the capture key (sorted branch names) to a branch in a
-# CaptureManifest id; mirrors the branch-scoped id separator in ir.py.
+# Unit Separator — CaptureManifest id에서 capture 키(정렬된 branch 이름들)와 branch를
+# 잇는다; ir.py의 branch-scoped id 구분자와 동일하다.
 _US = "\x1f"
 
 
 @dataclass(frozen=True)
 class CaptureResult:
-    """What an N-way capture projected.
+    """N-way capture가 projection한 것.
 
-    ``branches`` is the deduped, sorted, validated branch set actually captured.
-    ``commits`` is the size of the UNION of their histories (unique commits, each
-    materialized + extracted once).
+    ``branches``는 실제로 capture된, dedup·정렬·검증된 branch 집합이다.
+    ``commits``는 그 이력들의 합집합(UNION) 크기다(고유 커밋, 각각 한 번씩
+    실체화 + 추출).
     """
 
     branches: tuple[str, ...]
@@ -69,13 +67,13 @@ def _git(repo_path: str, *args: str) -> subprocess.CompletedProcess:
 
 
 def _is_shallow(repo_path: str) -> bool:
-    """True iff the repo is a shallow clone (truncated history)."""
+    """repo가 shallow clone(절단된 이력)일 때에만 True."""
     out = _git(repo_path, "rev-parse", "--is-shallow-repository")
     if out.returncode == 0:
         val = out.stdout.strip().lower()
         if val in ("true", "false"):
             return val == "true"
-    # Fallback for git versions without the flag: the shallow marker file.
+    # 이 플래그가 없는 git 버전을 위한 fallback: shallow marker 파일.
     marker = _git(repo_path, "rev-parse", "--git-path", "shallow")
     if marker.returncode == 0:
         p = Path(marker.stdout.strip())
@@ -86,10 +84,10 @@ def _is_shallow(repo_path: str) -> bool:
 
 
 def _validate_branches(repo_path: str, branches) -> list[str]:
-    """Dedup + sort + validate. Git-safe: each ref is peeled to a commit AFTER
-    ``--end-of-options`` so a name like ``-x`` can't be parsed as a git option.
-    A nonexistent branch is rejected honestly (ValueError), not as a raw
-    CalledProcessError."""
+    """dedup + 정렬 + 검증. git-safe: 각 ref는 ``--end-of-options`` 뒤에서(AFTER)
+    커밋으로 peel되므로 ``-x`` 같은 이름이 git 옵션으로 파싱될 수 없다.
+    존재하지 않는 branch는 raw CalledProcessError가 아니라 정직하게 거부된다
+    (ValueError)."""
     if not branches:
         raise ValueError("capture requires at least one branch")
     uniq = sorted(set(branches))
@@ -104,8 +102,8 @@ def _validate_branches(repo_path: str, branches) -> list[str]:
 
 
 def _head_sha(repo_path: str, branch: str) -> str:
-    """The branch tip commit. Uses the git-safe ``--verify`` peel form (which
-    prints only the object name — a bare ``--end-of-options`` would be echoed)."""
+    """branch tip 커밋. git-safe한 ``--verify`` peel 형식을 쓴다(객체 이름만
+    출력한다 — 맨(bare) ``--end-of-options``였다면 그대로 echo됐을 것이다)."""
     out = _git(
         repo_path, "rev-parse", "--verify", "--end-of-options",
         f"{branch}^{{commit}}",
@@ -115,7 +113,7 @@ def _head_sha(repo_path: str, branch: str) -> str:
 
 
 def _rev_list_union(repo_path: str, branches: list[str]) -> list[str]:
-    """The UNION of commits reachable from any branch, each once, oldest-first."""
+    """어느 branch에서든 도달 가능한 커밋의 합집합(UNION), 각각 한 번씩, oldest-first."""
     out = _git(
         repo_path, "rev-list", "--reverse", "--date-order",
         "--end-of-options", *branches,
@@ -125,7 +123,7 @@ def _rev_list_union(repo_path: str, branches: list[str]) -> list[str]:
 
 
 def _membership(repo_path: str, branches: list[str]) -> dict[str, set[str]]:
-    """commit SHA -> set of branches that contain it (invert per-branch rev-list)."""
+    """commit SHA -> 그것을 포함하는 branch 집합(branch별 rev-list를 뒤집는다)."""
     membership: dict[str, set[str]] = {}
     for b in branches:
         out = _git(repo_path, "rev-list", "--end-of-options", b)
@@ -159,10 +157,10 @@ def _write_manifest(driver, capture_key, branch, *, status, commit_count,
 
 
 def capture(driver, repo_path: Path | str, branches) -> CaptureResult:
-    """Project the full history of each branch into its own identity plane.
+    """각 branch의 전체 이력을 그 branch만의 정체성 plane으로 projection한다.
 
-    Idempotent (delete-then-project per branch, then MERGE-on-id) and
-    provider-free. Refuses a shallow repo before any extract (fail-closed).
+    멱등(idempotent, branch별 delete-then-project 후 MERGE-on-id)이며
+    provider-free다. 어떤 extract보다 먼저 shallow repo를 거부한다(fail-closed).
     """
     repo_path = str(repo_path)
     if _is_shallow(repo_path):
@@ -174,7 +172,7 @@ def capture(driver, repo_path: Path | str, branches) -> CaptureResult:
     repo_name = Path(repo_path).resolve().name
 
     create_constraints(driver)
-    # scoped-rebuild: wipe each specified plane ONCE up front (never per-commit).
+    # scoped-rebuild: 지정된 각 plane을 처음에 한 번(ONCE) 비운다(커밋별로는 절대 아님).
     for b in branches:
         wipe_branch_plane(driver, b)
 
@@ -194,8 +192,8 @@ def capture(driver, repo_path: Path | str, branches) -> CaptureResult:
             commit_count=per_branch_commits[b], head_sha=head, captured_at=None,
         )
 
-    # Dedup the EXTRACT axis: materialize + extract each unique commit ONCE, then
-    # fan the SAME base IR out to each branch that contains it (scope + ingest).
+    # EXTRACT 축을 dedup: 각 고유 커밋을 한 번(ONCE) 실체화 + 추출한 뒤, 같은(SAME)
+    # base IR을 그것을 포함하는 각 branch로 펼친다(scope + ingest).
     for sha in union:
         with tempfile.TemporaryDirectory() as tmp:
             _materialize_tree(repo_path, sha, tmp)
@@ -205,7 +203,7 @@ def capture(driver, repo_path: Path | str, branches) -> CaptureResult:
             for b in sorted(membership[sha]):
                 ingest(driver, scope_to_branch(base_ir, b))
 
-    # Partial-capture honesty: flip to `captured` only after ALL commits ingest.
+    # 부분 capture 정직성: 모든(ALL) 커밋이 ingest된 뒤에만 `captured`로 뒤집는다.
     now = datetime.now(timezone.utc).isoformat()
     for b in branches:
         head = _head_sha(repo_path, b)

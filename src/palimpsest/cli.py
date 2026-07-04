@@ -1,34 +1,33 @@
-"""Command-line entry for palimpsest: extract -> ingest and grounded recall.
+"""palimpsest 커맨드라인 진입점: extract -> ingest 및 근거결박 회상.
 
-Two stdlib-argparse subcommands wire the deterministic slice end to end:
+stdlib argparse 서브커맨드 둘이 결정론적 슬라이스를 끝에서 끝까지 엮는다:
 
   ingest --repo PATH [--commit HEAD]
-      Extract the Java tree under PATH + read git provenance for the pinned
-      commit, then create_constraints + ingest the IR into Neo4j.
+      PATH 아래 Java 트리를 추출하고 pin된 커밋의 git provenance를 읽은 뒤,
+      create_constraints + IR을 Neo4j에 ingest한다.
 
   backfill --repo PATH
-      Replay that same extract -> ingest over the FULL git history (every commit,
-      oldest -> newest) so the projection reflects the whole timeline, not just
-      HEAD. Provider-free, deterministic, idempotent; leaves the repo untouched.
+      바로 그 extract -> ingest 파이프라인을 전체 git 이력(모든 커밋,
+      oldest -> newest)에 재생해, projection이 HEAD만이 아니라 전체 타임라인을
+      반영하게 한다. provider-free, 결정론적, 멱등(idempotent); repo는 건드리지 않는다.
 
   query SYMBOL_OR_FILE [--depth N] [--limit M]
-      Run bounded, grounded recall from a seed (a symbol qualified_name or a
-      repo-relative file path) and print the result as clearly SEPARATED
-      sections — items (each with its commit + file:line source), inferred
-      summaries (in their own channel, never merged into items), gaps, and
-      confidence — never a merged prose answer.
+      seed(심볼 qualified_name 또는 repo 상대 파일 경로)에서 bounded·근거결박
+      회상을 수행하고, 결과를 명확히 분리된(SEPARATED) 섹션으로 출력한다 —
+      items(각각 commit + file:line 출처를 지님), inferred summaries(자기 채널에
+      머물며 items에 절대 병합되지 않음), gaps, confidence — 병합된 산문 답이
+      아니다.
 
   load PAYLOAD.json | PAYLOAD_DIR/
-      Load externally-produced summary JSON payloads (each an array of summary
-      objects) into the inferred layer via grounded, summary-atomic load. Accepts
-      a single file OR a DIRECTORY — the directory is the git-tracked
-      source-of-truth (git = SoT, Neo4j = re-buildable projection), so every
-      *.json inside it is batch-loaded and a dropped Neo4j can be rebuilt by
-      re-running load (deterministic ids make it idempotent). Prints the loaded
-      count and EVERY rejection reason — rejections are surfaced, never silently
-      dropped. palimpsest calls no model; payloads are generated elsewhere.
+      외부에서 생성된 summary JSON payload(각각 summary 객체 배열)를 근거결박·
+      summary 단위 적재로 inferred 층에 적재한다. 단일 파일 또는 디렉터리를
+      받는다 — 디렉터리가 git으로 추적되는 source-of-truth(git = SoT,
+      Neo4j = 재빌드 가능한 projection)이므로, 그 안의 모든 *.json이 일괄 적재되고
+      Neo4j를 날려도 load를 다시 돌리면 재빌드된다(결정론적 id 덕에 멱등). 적재된
+      건수와 모든(EVERY) 거부 사유를 출력한다 — 거부는 드러나며 조용히 버려지지
+      않는다. palimpsest는 어떤 모델도 호출하지 않는다; payload는 외부에서 생성된다.
 
-The Neo4j connection comes from the environment (localhost defaults):
+Neo4j 연결은 환경에서 온다(localhost 기본값):
   NEO4J_URI (bolt://localhost:7687), NEO4J_USER (neo4j), NEO4J_PASSWORD (neo4j).
 """
 
@@ -72,8 +71,8 @@ def _driver():
 def _cmd_ingest(args) -> None:
     prov = read_provenance(args.repo, args.commit)
     ir = extract(args.repo, prov)
-    # Materialize the deterministic Class-level Community partition into the IR so
-    # the generic ingest writers persist the Community nodes + MEMBER_OF edges.
+    # 결정론적 Class 수준 Community 분할을 IR에 실체화해, 범용 ingest 라이터가
+    # Community 노드 + MEMBER_OF 엣지를 영속화하도록 한다.
     augment_communities(ir, prov)
     with _driver() as driver:
         create_constraints(driver)
@@ -113,12 +112,12 @@ def _cmd_query(args) -> None:
 
 
 def _cmd_reconcile(args) -> int:
-    # The explicit branch set IS the comparison scope (ac-6): only these branches
-    # are captured + compared; unspecified branches never enter the query.
+    # 명시된 branch 집합이 곧 비교 범위다(ac-6): 이 branch들만 capture되고
+    # 비교된다; 명시되지 않은 branch는 쿼리에 절대 들어오지 않는다.
     branches = args.branch or []
     if not branches:
-        # N=0: defined, honest behavior — never a crash. There is nothing to
-        # compare without at least one branch to scope the comparison to.
+        # N=0: 정의된·정직한 동작 — 크래시가 아니다. 비교 범위를 한정할 branch가
+        # 하나도 없으면 비교할 대상 자체가 없다.
         print(
             "reconcile: no branch specified; pass at least one --branch to "
             "define the comparison scope"
@@ -126,10 +125,10 @@ def _cmd_reconcile(args) -> int:
         return 2
     with _driver() as driver:
         try:
-            # capture() validates the branch set git-safely (--end-of-options /
-            # --verify), dedups, and fails closed on a shallow repo; a bad branch
-            # or shallow repo raises. Catch it here so the CLI prints an honest
-            # error instead of leaking a raw Python traceback.
+            # capture()는 branch 집합을 git-safe하게 검증하고(--end-of-options /
+            # --verify), dedup하며, shallow repo에서는 fail-closed한다; 잘못된
+            # branch나 shallow repo는 예외를 던진다. 여기서 잡아 CLI가 raw Python
+            # traceback을 흘리는 대신 정직한 에러를 출력하게 한다.
             capture(driver, args.repo, branches)
             result = reconcile_recall(
                 driver, args.symbol, branches, limit=args.limit
@@ -142,9 +141,9 @@ def _cmd_reconcile(args) -> int:
 
 
 def _semantic_annotations(semantic) -> list[str]:
-    """Flatten the DISPLAY-ONLY inferred layer bound to a peer into terse
-    (verdict, confidence, source) lines. palimpsest generates none of it — this
-    only surfaces what an external judge already loaded. Author-omitted."""
+    """peer에 결박된 표시 전용(DISPLAY-ONLY) inferred 층을 간결한
+    (verdict, confidence, source) 라인으로 평탄화한다. palimpsest는 이 중 무엇도
+    생성하지 않는다 — 외부 judge가 이미 적재한 것을 드러낼 뿐이다. author는 제외."""
     lines = []
     for channel in ("summaries", "risks", "decisions", "relations"):
         for entry in semantic.get(channel, []):
@@ -161,9 +160,9 @@ def _semantic_annotations(semantic) -> list[str]:
 
 
 def _print_reconcile(symbol, result) -> None:
-    # SEPARATED sections (mirrors _print_result): per-branch PEERS, then the
-    # computed CODE DIVERGENCE, then the surfaced CONFLICTS, then GAPS — never a
-    # merged prose answer, and no privileged branch.
+    # 분리된(SEPARATED) 섹션(_print_result과 동일 구조): branch별 PEERS, 이어서
+    # 계산된 CODE DIVERGENCE, 드러난 CONFLICTS, 그다음 GAPS — 병합된 산문 답이
+    # 아니며, 특권을 가진 branch도 없다.
     peers = result["peers"]
     branches = result["branches"]
     print(f"RECONCILE: {symbol}  (branches={', '.join(branches)})")
@@ -204,9 +203,9 @@ def _read_payload_file(path) -> list:
 
 
 def _cmd_load(args) -> None:
-    # A DIRECTORY is the git-tracked source-of-truth: batch-load every *.json
-    # payload file inside it (sorted, deterministic) so a Neo4j drop can be
-    # rebuilt from git. A single file keeps the original one-payload behavior.
+    # 디렉터리가 git으로 추적되는 source-of-truth다: 그 안의 모든 *.json payload
+    # 파일을 일괄 적재(정렬, 결정론적)해 Neo4j를 날려도 git에서 재빌드할 수 있게
+    # 한다. 단일 파일은 원래의 단일 payload 동작을 유지한다.
     if os.path.isdir(args.payload):
         summaries = [
             s for p in sorted(Path(args.payload).glob("*.json"))
@@ -216,10 +215,10 @@ def _cmd_load(args) -> None:
         summaries = _read_payload_file(args.payload)
     with _driver() as driver:
         result = load_summaries(driver, summaries)
-        # Provision the Summary embedding VECTOR INDEX on the load path (mirrors
-        # how _cmd_ingest calls create_constraints): a reload after a Neo4j drop
-        # re-creates the index from the git-tracked payload, so embeddings +
-        # index survive a drop. Idempotent (IF NOT EXISTS); awaits ONLINE.
+        # load 경로에서 Summary 임베딩 VECTOR INDEX를 마련한다(_cmd_ingest가
+        # create_constraints를 부르는 것과 같은 방식): Neo4j를 날린 뒤 다시 load하면
+        # git으로 추적되는 payload에서 인덱스가 재생성되므로, 임베딩 + 인덱스가 drop을
+        # 견딘다. 멱등(IF NOT EXISTS); ONLINE이 될 때까지 대기한다.
         create_vector_index(driver)
     _print_load_result(args.payload, result)
 
@@ -275,9 +274,9 @@ def _print_result(symbol, depth, limit, result) -> None:
 
 
 def _print_channel(title, count_key, result, limit, seed=None) -> None:
-    # A SEPARATE section per MODIFIES channel (mirrors _print_result): the ranked
-    # Files (each with its commit + file:line source and the count that ranked it),
-    # then the GAPS — with a ``(none)`` empty case, never a confident empty answer.
+    # MODIFIES 채널마다 분리된(SEPARATE) 섹션(_print_result과 동일 구조): 순위가
+    # 매겨진 Files(각각 commit + file:line 출처와 순위를 정한 count를 지님), 이어서
+    # GAPS — ``(none)`` 빈 경우까지 두어, 확신에 찬 빈 답을 절대 내지 않는다.
     items = result["items"]
     head = f"{title}: {seed}  (limit={limit})" if seed else f"{title}  (limit={limit})"
     print(head)
@@ -371,8 +370,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    # Existing subcommands return None (-> 0, byte-identical); reconcile returns an
-    # explicit exit code so honest rejections (bad/missing branch) are non-zero.
+    # 기존 서브커맨드는 None을 반환한다(-> 0, byte 단위 동일); reconcile은 명시적
+    # exit code를 반환해 정직한 거부(잘못된/누락된 branch)가 0이 아니게 한다.
     return args.func(args) or 0
 
 

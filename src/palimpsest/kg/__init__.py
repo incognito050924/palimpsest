@@ -1,8 +1,8 @@
-"""Knowledge Graph ingest: extraction IR -> Neo4j (deterministic ontology).
+"""Knowledge Graph 적재: 추출 IR -> Neo4j (결정론적 온톨로지).
 
-Realizes the minimal, deterministic ontology in Neo4j and batch-ingests the
-extraction ``IR`` idempotently (MERGE-on-id; git is SoT so the projection is
-rebuildable) with git provenance + freshness stamping.
+최소한의 결정론적 온톨로지를 Neo4j에 실현하고, 추출된 ``IR``을 멱등(idempotent)하게
+배치 적재한다(MERGE-on-id; git이 SoT이므로 projection은 재구축 가능). git provenance와
+신선도(freshness) 스탬프를 함께 남긴다.
 """
 
 from palimpsest.kg.community import (

@@ -1,28 +1,28 @@
-"""Load externally-generated semantic summaries into the KG (provider-free).
+"""외부에서 생성된 의미 요약을 KG로 적재한다 (provider-free).
 
-palimpsest calls NO LLM. A summary is produced by an external generator and
-handed to :func:`load_summaries` for grounded, idempotent load. This inferred
-layer is kept SEPARATE from the deterministic structural layer by two markers:
+palimpsest는 LLM을 전혀 호출하지 않는다. 요약은 외부 생성기가 만들어
+:func:`load_summaries`에 넘겨 근거결박·멱등 적재를 맡긴다. 이 inferred 층은 두
+표식으로 결정론적 구조층과 분리해 유지한다:
 
-  * node label ``Summary`` (never a code label), and
-  * ``edge_kind = "inferred"`` on every ``SUMMARIZES`` edge (deterministic edges
-    are ``"deterministic"``) — the schema-enforced no-laundering separation.
+  * 노드 라벨 ``Summary`` (절대 코드 라벨이 아님), 그리고
+  * 모든 ``SUMMARIZES`` 엣지의 ``edge_kind = "inferred"`` (결정론적 엣지는
+    ``"deterministic"``) — 스키마로 강제되는 no-laundering 분리.
 
-Honesty (summary-atomic). Each claim must be grounded in >=1 ``source_ref`` that
-resolves to a real graph node. A summary that fails any check is REJECTED with a
-reason — never silently dropped, never partially loaded. Rejecting one summary
-does not stop the rest from loading. The deterministic ``_REL_MERGE`` writer
-(``MATCH..MATCH..MERGE``) is deliberately NOT reused: an unresolved endpoint
-would make it write nothing *silently*, which would violate this contract; here
-every endpoint is resolved up front and mismatches are rejected.
+정직성(summary-atomic, 요약 단위 원자성). 각 claim은 실제 그래프 노드로 해결되는
+``source_ref`` 1개 이상에 결박되어야 한다. 어느 검사든 실패한 요약은 이유와 함께
+거부(REJECT)된다 — 절대 무음 드롭도, 부분 적재도 없다. 한 요약의 거부가 나머지
+적재를 멈추지 않는다. 결정론적 ``_REL_MERGE`` writer(``MATCH..MATCH..MERGE``)는
+의도적으로 재사용하지 않는다: 미해결 엔드포인트가 있으면 *무음으로* 아무것도 쓰지
+않게 되어 이 계약을 위반한다; 여기서는 모든 엔드포인트를 미리 해결하고 불일치는
+거부한다.
 
-Idempotence. The Summary id is deterministic and namespace-isolated
-(``summary:<hash>`` — a code ``qualified_name`` can never collide), and every
-write is MERGE-on-id, so re-loading the same payload changes nothing.
+멱등성(Idempotence). Summary id는 결정론적이고 네임스페이스로 격리된다
+(``summary:<hash>`` — 코드 ``qualified_name``과 절대 충돌하지 않는다). 모든 쓰기는
+MERGE-on-id라서, 같은 payload를 다시 적재해도 아무것도 바뀌지 않는다.
 
-Freshness. ``code_bound_at`` binds to the resolved TARGET node's ``committed_at``
-(freshness follows the code, not the generator's wall-clock). ``created_at`` is
-the external generation time carried on the payload.
+신선도(Freshness). ``code_bound_at``은 해결된 TARGET 노드의 ``committed_at``에
+결박된다 (신선도는 생성기의 벽시계가 아니라 코드를 따른다). ``created_at``은
+payload에 실려 온 외부 생성 시각이다.
 """
 
 from __future__ import annotations
@@ -33,13 +33,13 @@ from dataclasses import dataclass
 
 from palimpsest.ir import EDGE_KIND_INFERRED, EMBEDDING_DIM, SUMMARY, Summary
 
-# The Summary vector index (single, closed name): cosine over EMBEDDING_DIM.
+# Summary 벡터 인덱스 (단일·닫힌 이름): EMBEDDING_DIM에 대한 cosine.
 VECTOR_INDEX_NAME = "summary_embedding_cosine"
 
 
 @dataclass(frozen=True)
 class Rejection:
-    """A refused summary and why — surfaced, never swallowed."""
+    """거부된 요약과 그 이유 — 드러내며, 절대 삼키지 않는다."""
 
     summary_id: str
     reason: str
@@ -47,12 +47,12 @@ class Rejection:
 
 @dataclass(frozen=True)
 class SummaryLoadResult:
-    """Outcome of a load batch: counts + the explicit rejection reasons.
+    """적재 배치의 결과: 개수 + 명시적 거부 이유들.
 
-    ``embedded`` is how many loaded summaries carried a (valid) embedding;
-    ``indexed`` is how many of them are actually queryable through the vector
-    index right now (0 if the index is absent/not-online) — the two make a
-    silently-unindexed vector visible instead of silently unsearchable.
+    ``embedded``는 적재된 요약 중 (유효한) 임베딩을 지닌 개수다;
+    ``indexed``는 그중 지금 벡터 인덱스로 실제 질의 가능한 개수다 (인덱스가
+    없거나 online이 아니면 0) — 이 둘이 무음으로 인덱싱되지 않은 벡터를 무음
+    검색불가로 두지 않고 드러낸다.
     """
 
     intended: int
@@ -64,19 +64,19 @@ class SummaryLoadResult:
 
 
 def summary_id(target_id: str, generator: str, model: str, source_commit: str) -> str:
-    """Deterministic, namespace-isolated Summary id.
+    """결정론적이고 네임스페이스로 격리된 Summary id.
 
-    The ``summary:`` prefix guarantees it can never equal a code
-    ``qualified_name`` (a Java FQN / repo path), so a Summary never shadows a
-    code node even on a hash coincidence; the hash makes re-load idempotent.
+    ``summary:`` 프리픽스가 코드 ``qualified_name``(Java FQN / repo path)과 절대
+    같아질 수 없음을 보장하므로, 해시 우연 충돌이 나더라도 Summary가 코드 노드를
+    가리지 않는다; 해시는 재적재를 멱등하게 만든다.
     """
     raw = "\x00".join([target_id, generator, model, source_commit])
     return "summary:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-# Label ("Summary") and rel type ("SUMMARIZES") are closed constants baked into
-# the query text; every piece of summary DATA (id, texts, refs, provenance) rides
-# in as ``$params`` so adversarial claim text is inert.
+# 라벨("Summary")과 rel type("SUMMARIZES")은 쿼리 텍스트에 박아 넣은 닫힌 상수다;
+# 요약 데이터의 모든 조각(id, 텍스트, refs, provenance)은 ``$params``로 실려 들어와,
+# 적대적 claim 텍스트가 무해해진다.
 _SUMMARY_MERGE = """
 MERGE (s:Summary {id: $id})
 SET s.target_id     = $target_id,
@@ -94,8 +94,8 @@ SET s.target_id     = $target_id,
     s.embedding_dim = $embedding_dim
 """
 
-# Endpoints are pre-resolved above (unresolved -> the whole summary is rejected,
-# never a silent MATCH..MATCH..MERGE no-op), so every MERGE here materialises.
+# 엔드포인트는 위에서 미리 해결된다 (미해결 -> 요약 전체가 거부되며, 무음
+# MATCH..MATCH..MERGE no-op은 절대 없다). 그래서 여기의 모든 MERGE는 구현된다.
 _SUMMARIZES_MERGE = """
 MATCH (s:Summary {id: $id})
 UNWIND $targets AS tid
@@ -112,8 +112,8 @@ SET r.edge_kind     = $edge_kind,
 
 
 def _structural_reject_reason(s: Summary):
-    """A reason the summary is malformed on its face, or None if it is well-formed
-    (grounding of refs is checked separately, against the live graph)."""
+    """요약이 겉으로 봐도 잘못된 이유, 또는 well-formed이면 None
+    (refs의 근거결박은 라이브 그래프를 상대로 별도로 검사한다)."""
     if not (s.generator and s.generator.strip()):
         return "missing generator"
     if not (s.model and s.model.strip()):
@@ -123,9 +123,9 @@ def _structural_reject_reason(s: Summary):
     for i, claim in enumerate(s.claims):
         if not claim.source_refs:
             return f"claim {i} has no source ref"
-    # Embedding is optional (back-compat), but if present it must be well-formed:
-    # the dimension check uses the SAME EMBEDDING_DIM as the vector index DDL, so
-    # a wrong-dim vector is rejected here rather than silently skipped by Neo4j.
+    # 임베딩은 선택 사항이지만(하위 호환), 있으면 반드시 well-formed여야 한다:
+    # 차원 검사는 벡터 인덱스 DDL과 동일한 EMBEDDING_DIM을 쓰므로, 차원이 틀린
+    # 벡터는 Neo4j가 무음으로 건너뛰는 대신 여기서 거부된다.
     if s.embedding is not None:
         if len(s.embedding) != EMBEDDING_DIM:
             return (
@@ -138,7 +138,7 @@ def _structural_reject_reason(s: Summary):
 
 
 def _endpoints(s: Summary) -> set[str]:
-    """Every node id that must resolve: the target plus every claim's refs."""
+    """해결되어야 하는 모든 노드 id: target과 모든 claim의 refs."""
     refs = {ref for claim in s.claims for ref in claim.source_refs}
     refs.add(s.target_id)
     return refs
@@ -162,19 +162,19 @@ def _committed_at(session, node_id: str):
     return rec["committed_at"] if rec else None
 
 
-# A CommunityReport is a Summary whose target is a Community node — recognised by
-# the ``community:`` id namespace (mirrors kg.community.community_id). Such a
-# report carries the extra membership-grounding rule below.
+# CommunityReport는 target이 Community 노드인 Summary다 — ``community:`` id
+# 네임스페이스로 식별한다(kg.community.community_id을 미러링). 그런 리포트는 아래의
+# 추가 멤버십-grounding 규칙을 진다.
 _COMMUNITY_NS = "community:"
 
 
 def _in_community(session, community_id: str, refs: set[str]) -> set[str]:
-    """Of ``refs``, the ids that belong to the target Community — a member Class,
-    or a node contained by a member Class (e.g. a Method of a member).
+    """``refs`` 중 target Community에 속하는 id들 — 멤버 Class이거나, 멤버 Class가
+    담고 있는 노드(예: 멤버의 Method).
 
-    Enforces membership-grounding for a CommunityReport: a report ABOUT a
-    community must ground its claims in that community's members, not arbitrary
-    code. Refs not returned here are non-members and reject the whole report.
+    CommunityReport의 멤버십-grounding을 강제한다: 어떤 community에 관한 리포트는
+    임의의 코드가 아니라 그 community의 멤버에 claim을 결박해야 한다. 여기서 반환되지
+    않은 refs는 비멤버이며 리포트 전체를 거부시킨다.
     """
     if not refs:
         return set()
@@ -197,8 +197,8 @@ def _in_community(session, community_id: str, refs: set[str]) -> set[str]:
 
 def _write(session, sid: str, s: Summary, endpoints: set[str], code_bound_at) -> None:
     claims = [json.dumps(c.to_dict(), ensure_ascii=False) for c in s.claims]
-    # Neo4j properties are primitives/arrays, not maps, so the external judge's
-    # verdict is stored as a JSON string (like claims); recall parses it back.
+    # Neo4j 속성은 맵이 아니라 원시값/배열이므로, 외부 judge의 verdict는 (claims처럼)
+    # JSON 문자열로 저장하고, 회상 시 다시 파싱한다.
     semantic_verdict = (
         json.dumps(s.semantic_verdict, ensure_ascii=False)
         if s.semantic_verdict is not None
@@ -235,8 +235,8 @@ def _write(session, sid: str, s: Summary, endpoints: set[str], code_bound_at) ->
     )
 
 
-# EMBEDDING_DIM and 'cosine' are trusted internal constants (like the baked
-# Summary label), never payload data — safe to inline into the DDL text.
+# EMBEDDING_DIM과 'cosine'은 (박아 넣은 Summary 라벨처럼) 신뢰된 내부 상수이며,
+# 절대 payload 데이터가 아니다 — DDL 텍스트에 인라인해도 안전하다.
 _CREATE_VECTOR_INDEX = (
     f"CREATE VECTOR INDEX `{VECTOR_INDEX_NAME}` IF NOT EXISTS "
     f"FOR (s:`{SUMMARY}`) ON (s.embedding) "
@@ -247,15 +247,15 @@ _CREATE_VECTOR_INDEX = (
 
 
 def create_vector_index(driver) -> None:
-    """Provision the Summary embedding VECTOR INDEX (cosine, EMBEDDING_DIM).
+    """Summary 임베딩 VECTOR INDEX를 마련한다 (cosine, EMBEDDING_DIM).
 
-    Idempotent (``IF NOT EXISTS``), mirroring ``create_constraints``. Neo4j
-    populates a vector index asynchronously, so this AWAITs it reaching ONLINE:
-    an immediate query on a still-POPULATING index returns partial/empty results.
+    ``create_constraints``를 미러링해 멱등하다(``IF NOT EXISTS``). Neo4j는 벡터
+    인덱스를 비동기로 채우므로, 이 함수는 인덱스가 ONLINE에 도달하기를 기다린다
+    (AWAIT): 아직 POPULATING 중인 인덱스에 곧바로 질의하면 부분/빈 결과가 나온다.
     """
     with driver.session() as session:
         session.run(_CREATE_VECTOR_INDEX)
-        # Block until every index (this one included) finishes populating.
+        # 모든 인덱스(이것 포함)의 채우기가 끝날 때까지 블록한다.
         session.run("CALL db.awaitIndexes($timeout)", timeout=300)
 
 
@@ -268,12 +268,12 @@ def _index_online(session, name: str) -> bool:
 
 
 def _indexed_count(session) -> int:
-    """How many embedded Summary nodes are queryable through the vector index now.
+    """지금 벡터 인덱스로 질의 가능한, 임베딩을 지닌 Summary 노드가 몇 개인지.
 
-    0 if the index is absent/not-online. Otherwise a k>=total queryNodes probe
-    returns every indexed node (queryNodes yields up to k regardless of score),
-    so counting the distinct hits gives the actually-indexed total — catching a
-    vector Neo4j silently failed to index (silent-unsearchable visibility)."""
+    인덱스가 없거나 online이 아니면 0. 그렇지 않으면 k>=total인 queryNodes 프로브가
+    인덱싱된 모든 노드를 반환한다(queryNodes는 점수와 무관하게 최대 k개를 낸다).
+    그래서 중복 없는 히트 수를 세면 실제로 인덱싱된 총계가 나온다 — Neo4j가 무음으로
+    인덱싱에 실패한 벡터를 잡아낸다(무음 검색불가 가시성)."""
     if not _index_online(session, VECTOR_INDEX_NAME):
         return 0
     session.run("CALL db.awaitIndexes($timeout)", timeout=300)
@@ -293,11 +293,11 @@ def _indexed_count(session) -> int:
 
 
 def _established_embedding_model(session):
-    """The embedding_model already bound to any Summary in the graph, or None.
+    """그래프의 어떤 Summary에든 이미 결박된 embedding_model, 또는 None.
 
-    A cosine vector index is single-model — comparing vectors from different
-    models is meaningless even at equal dimension — so the first model loaded
-    establishes the index's model and later loads must match it."""
+    cosine 벡터 인덱스는 단일-model이다 — 다른 model의 벡터를 비교하는 것은 차원이
+    같아도 무의미하다 — 그래서 처음 적재된 model이 인덱스의 model을 확립하고, 이후
+    적재는 그것과 일치해야 한다."""
     rec = session.run(
         "MATCH (s:Summary) WHERE s.embedding_model IS NOT NULL "
         "RETURN s.embedding_model AS m LIMIT 1"
@@ -306,13 +306,13 @@ def _established_embedding_model(session):
 
 
 def load_summaries(driver, summaries) -> SummaryLoadResult:
-    """Load externally-generated summaries into the inferred KG layer.
+    """외부에서 생성된 요약을 inferred KG 층으로 적재한다.
 
-    Each summary is validated then, if grounded, MERGEd as a ``Summary`` node with
-    ``SUMMARIZES`` edges (``edge_kind='inferred'``) to its resolved target/refs.
-    A summary that is malformed or whose refs do not all resolve is REJECTED with
-    a reason (summary-atomic — none of its claims load); the rest still load.
-    Returns intended/loaded/rejected counts plus the rejection reasons.
+    각 요약을 검증한 뒤, 근거결박되면 해결된 target/refs로 향하는 ``SUMMARIZES``
+    엣지(``edge_kind='inferred'``)를 단 ``Summary`` 노드로 MERGE한다. 잘못됐거나
+    refs가 전부 해결되지 않는 요약은 이유와 함께 거부된다(summary-atomic — 그 claim은
+    하나도 적재되지 않는다); 나머지는 그대로 적재된다. intended/loaded/rejected 개수와
+    거부 이유들을 반환한다.
     """
     summaries = list(summaries)
     rejections: list[Rejection] = []
@@ -320,8 +320,8 @@ def load_summaries(driver, summaries) -> SummaryLoadResult:
     embedded = 0
 
     with driver.session() as session:
-        # The model already established for the index (from prior loads); the
-        # first embedded summary in THIS batch establishes it if none exists yet.
+        # 인덱스에 이미 확립된 model (이전 적재에서); 아직 없으면 이 배치의 첫
+        # 임베딩 요약이 그것을 확립한다.
         established_model = _established_embedding_model(session)
         for s in summaries:
             sid = summary_id(s.target_id, s.generator, s.model, s.source_commit)
@@ -331,8 +331,8 @@ def load_summaries(driver, summaries) -> SummaryLoadResult:
                 rejections.append(Rejection(sid, reason))
                 continue
 
-            # Single-embedding-model-per-index: a well-formed embedding whose
-            # model differs from the established one is rejected (rest still load).
+            # 인덱스당 단일 임베딩 model: well-formed 임베딩이라도 model이 확립된
+            # 것과 다르면 거부된다 (나머지는 그대로 적재된다).
             if s.embedding is not None:
                 if established_model is None:
                     established_model = s.embedding_model
@@ -354,8 +354,8 @@ def load_summaries(driver, summaries) -> SummaryLoadResult:
                 )
                 continue
 
-            # Membership-grounding: a CommunityReport (target is a community: node)
-            # must ground every claim ref in a member of that community.
+            # 멤버십-grounding: CommunityReport(target이 community: 노드)는 모든
+            # claim ref를 그 community의 멤버에 결박해야 한다.
             if s.target_id.startswith(_COMMUNITY_NS):
                 claim_refs = {ref for claim in s.claims for ref in claim.source_refs}
                 non_member = sorted(
