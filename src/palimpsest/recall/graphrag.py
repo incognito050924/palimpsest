@@ -44,6 +44,7 @@ Design (ac-2 recall + ac-3 honesty):
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 
 from palimpsest.ir import (
@@ -53,7 +54,9 @@ from palimpsest.ir import (
     IMPORTS,
     MEMBER_OF,
     INFERRED_RELATION_TYPES,
+    EMBEDDING_DIM,
 )
+from palimpsest.kg.summary import VECTOR_INDEX_NAME
 
 # The relations recall may traverse (the deterministic structural ontology).
 DEFAULT_RELATIONS = (CALLS, DEPENDS_ON, CONTAINS, IMPORTS)
@@ -811,6 +814,119 @@ def _peer_entry(driver, r, limit):
         # display-only semantic annotation (external-bound; verdict + confidence).
         "semantic": _peer_semantic(driver, r["id"], limit),
     }
+
+
+# Similarity floor for vector-KNN recall. Neo4j's cosine index returns a
+# NORMALIZED score = (1 + cosine) / 2 for cosine >= 0, and CLAMPS negative cosines
+# to 0.5 (orthogonal and opposite both score 0.5) — verified empirically. A hit
+# below this floor is not a confident match, so it is reported as an explicit gap
+# rather than filling k with a low-similarity answer (ac-3 honesty). 0.6 ~ cosine 0.2.
+_MIN_COSINE_SCORE = 0.6
+
+
+class InvalidQueryVector(ValueError):
+    """A query_vector that is not a valid EMBEDDING_DIM cosine vector (wrong
+    length, or containing NaN/inf). Raised BEFORE the driver query so the caller
+    gets a typed rejection instead of a raw Neo4j exception (ac-5: the query
+    vector is caller-supplied — palimpsest never embeds)."""
+
+
+def _validate_query_vector(query_vector) -> None:
+    """Reject a malformed query vector up front: it must have exactly
+    EMBEDDING_DIM components (the index dimension) and no NaN/inf."""
+    try:
+        n = len(query_vector)
+    except TypeError as exc:
+        raise InvalidQueryVector("query_vector must be a sequence of floats") from exc
+    if n != EMBEDDING_DIM:
+        raise InvalidQueryVector(
+            f"query_vector must have length {EMBEDDING_DIM}, got {n}"
+        )
+    if not all(math.isfinite(x) for x in query_vector):
+        raise InvalidQueryVector("query_vector must not contain NaN or inf")
+
+
+# Top-k cosine over the Summary VECTOR INDEX, then (like the summaries channel)
+# one row per (summary, grounded-ref) so `_summary_channel` can group + set stale
+# off the TARGET ref. ``score`` (the index's cosine similarity) and the target's
+# ``branch`` ride along per row. Branch scoping mirrors reconcile's ``branch IN
+# $branches`` filter (null $branches = all planes); ORDER BY score DESC keeps the
+# grouping — and thus the summaries channel — in cosine-descending order.
+_SEMANTIC_KNN = """
+CALL db.index.vector.queryNodes($index_name, $k, $query_vector) YIELD node AS s, score
+MATCH (s)-[:SUMMARIZES]->(tgt {id: s.target_id})
+WHERE $branches IS NULL OR tgt.branch IN $branches
+MATCH (s)-[r:SUMMARIZES]->(g)
+RETURN s.id AS id, s.target_id AS target_id, s.claims AS claims,
+       s.code_bound_at AS code_bound_at, s.semantic_verdict AS semantic_verdict,
+       r.edge_kind AS edge_kind, score AS score, tgt.branch AS branch,
+       g.id AS ref_id, g.source_commit AS source_commit, g.path AS path,
+       g.start_line AS start_line, g.end_line AS end_line,
+       g.committed_at AS committed_at
+ORDER BY score DESC, id, ref_id
+"""
+
+
+def recall_semantic(driver, query_vector, branches=None, limit=25):
+    """Standalone vector-KNN recall: the top-k cosine Summaries for a query vector.
+
+    ``query_vector`` is a caller-supplied EMBEDDING_DIM float vector (palimpsest
+    never embeds — ac-5 provider-free). Runs a top-k cosine query over the Summary
+    VECTOR INDEX and returns the SAME bounded ``{items, sources, summaries, ...}``
+    shape as the sibling entry points; the matched Summaries surface in the
+    separate ``summaries`` channel, cosine-descending, each carrying:
+
+    * ``score`` — the index's cosine similarity, kept SEPARATE from the result's
+      grounding-coverage ``confidence`` (a cosine is never a confidence, ac-3);
+    * ``stale`` — the freshness flag every Summary-surfacing path attaches (set via
+      :func:`_summary_channel` off the SUMMARIZES target's current committed_at); and
+    * ``branch`` — the plane the hit came from (ADR-20260703 branch-scoped identity).
+
+    ``branches`` (default None = all planes) scopes the KNN candidate set to those
+    branch planes so a global cosine query cannot silently mix branch-scoped planes.
+    ``limit`` bounds k (clamped to >=1, since ``queryNodes`` requires k>=1). A best
+    match below the similarity floor is an explicit ``gap`` — never a confident-empty
+    or low-similarity filled-k answer (ac-3 honesty). Combinatorial only: a single
+    vector query + dict building, no LLM anywhere.
+    """
+    _validate_query_vector(query_vector)
+    k = max(1, limit)  # queryNodes requires k>=1 (unlike a Cypher LIMIT 0)
+    branch_filter = sorted(set(branches)) if branches is not None else None
+
+    with driver.session() as session:
+        rows = [
+            r.data()
+            for r in session.run(
+                _SEMANTIC_KNN,
+                index_name=VECTOR_INDEX_NAME,
+                k=k,
+                query_vector=list(query_vector),
+                branches=branch_filter,
+            )
+        ]
+
+    # Similarity floor: drop hits below it (all rows of one summary share its
+    # score) so k is never filled with a low-similarity, confident-empty answer.
+    kept = [row for row in rows if row["score"] >= _MIN_COSINE_SCORE]
+    # Per-summary (score, branch), first row wins under the ORDER BY score DESC.
+    meta = {}
+    for row in kept:
+        meta.setdefault(row["id"], (row["score"], row["branch"]))
+
+    entries = _summary_channel(kept)  # groups + sets stale off the target ref
+    for entry in entries:
+        score, branch = meta[entry["id"]]
+        entry["score"] = score    # cosine similarity — SEPARATE from confidence
+        entry["branch"] = branch  # branch plane of the hit (ADR-20260703)
+    entries.sort(key=lambda e: e["score"], reverse=True)
+
+    gaps = []
+    if not entries:
+        gaps = [
+            f"no Summary within similarity floor {_MIN_COSINE_SCORE} of the query "
+            f"vector (branches={branch_filter})"
+        ]
+    return _result([], gaps, None, entries)
 
 
 def reconcile_recall(driver, symbol, branches, limit=25):

@@ -98,6 +98,14 @@ INFERRED_RELATION_TYPES = frozenset({CAUSALLY_RELATES, RELATES_TO, CONFLICTS_WIT
 EDGE_KIND_DETERMINISTIC = "deterministic"
 EDGE_KIND_INFERRED = "inferred"
 
+# The single shared embedding dimension. This ONE constant is used by BOTH the
+# Neo4j VECTOR INDEX DDL and the per-summary dimension validator — never two
+# literals: Neo4j silently SKIPS a vector property whose size != the index
+# dimension (silent-unsearchable on drift), so the guard and the index must agree
+# by construction. palimpsest is provider-free: the embedding arrives on the
+# payload (produced elsewhere); palimpsest never generates one.
+EMBEDDING_DIM = 1536
+
 
 @dataclass(frozen=True)
 class Provenance:
@@ -279,6 +287,15 @@ class Summary:
     # ``{"verdict": "faithful"|"unfaithful"|"unverified", "judge": str, "model": str}``.
     # palimpsest never produces this; it only ingests it. Absent -> None (unverified).
     semantic_verdict: Optional[dict] = None
+    # An EXTERNAL embedding of the summary, produced elsewhere and handed in
+    # (provider-free: palimpsest never generates one). ``embedding`` is the vector
+    # (float[EMBEDDING_DIM]); ``embedding_model`` names the model that produced it
+    # (a cosine index is single-model — mixing models is meaningless even at equal
+    # dim); ``embedding_dim`` is the declared dimension. All absent -> None so a
+    # pre-existing embedding-less payload loads unchanged.
+    embedding: Optional[list[float]] = None
+    embedding_model: Optional[str] = None
+    embedding_dim: Optional[int] = None
 
     def to_dict(self) -> dict:
         return {
@@ -291,10 +308,14 @@ class Summary:
             "prompt": self.prompt,
             "confidence": self.confidence,
             "semantic_verdict": self.semantic_verdict,
+            "embedding": list(self.embedding) if self.embedding is not None else None,
+            "embedding_model": self.embedding_model,
+            "embedding_dim": self.embedding_dim,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Summary":
+        embedding = data.get("embedding")
         return cls(
             target_id=data["target_id"],
             claims=tuple(SummaryClaim.from_dict(c) for c in data.get("claims", ())),
@@ -305,6 +326,9 @@ class Summary:
             prompt=data.get("prompt"),
             confidence=data.get("confidence"),
             semantic_verdict=data.get("semantic_verdict"),
+            embedding=list(embedding) if embedding is not None else None,
+            embedding_model=data.get("embedding_model"),
+            embedding_dim=data.get("embedding_dim"),
         )
 
 

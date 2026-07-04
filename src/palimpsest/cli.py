@@ -47,6 +47,7 @@ from palimpsest.backfill import backfill
 from palimpsest.extract import extract, read_provenance
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
+from palimpsest.kg.summary import create_vector_index
 from palimpsest.recall import recall
 from palimpsest.recall.graphrag import reconcile_recall
 from palimpsest.reconcile import capture
@@ -202,6 +203,11 @@ def _cmd_load(args) -> None:
         summaries = _read_payload_file(args.payload)
     with _driver() as driver:
         result = load_summaries(driver, summaries)
+        # Provision the Summary embedding VECTOR INDEX on the load path (mirrors
+        # how _cmd_ingest calls create_constraints): a reload after a Neo4j drop
+        # re-creates the index from the git-tracked payload, so embeddings +
+        # index survive a drop. Idempotent (IF NOT EXISTS); awaits ONLINE.
+        create_vector_index(driver)
     _print_load_result(args.payload, result)
 
 

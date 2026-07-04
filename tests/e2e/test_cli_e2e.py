@@ -247,6 +247,108 @@ def test_e2e_semantic_verdict_survives_drop_and_reload(cli_env, tmp_path):
     assert after is not None and json.loads(after) == verdict
 
 
+# --- ac-4: durability — embedding + vector index survive a Neo4j drop + reload --
+
+
+EMBED_DIM = 1536
+# A deterministic, non-zero LITERAL embedding (no model call — the vector rides
+# in on the git-tracked payload, provider-free). Components are (k+1)/8, all
+# exactly representable as doubles, so the stored value round-trips byte-identical.
+_EMBEDDING = [((i % 8) + 1) / 8.0 for i in range(EMBED_DIM)]
+EMBEDDING_MODEL = "ext-embed-v1"
+
+
+def _embedded_summary_dict(target_id, refs):
+    d = _summary_dict(target_id, refs)
+    d["embedding"] = list(_EMBEDDING)
+    d["embedding_model"] = EMBEDDING_MODEL
+    d["embedding_dim"] = EMBED_DIM
+    return d
+
+
+def _write_embedded_payload_dir(root):
+    """A git-tracked payload dir holding one embedded summary, grounded in real
+    ingested fixture nodes."""
+    root.mkdir()
+    (root / "e.json").write_text(
+        json.dumps([_embedded_summary_dict(CTRL_METHOD, [CTRL_METHOD, SVC_METHOD])])
+    )
+    return root
+
+
+def _vector_queryable_embedding(driver, target_id):
+    """The stored embedding for ``target_id`` iff it is queryable through the
+    Summary vector index right now, else None. Awaits ONLINE first; a missing
+    index (not yet provisioned) yields None instead of raising, so the assertion
+    reads as a clean AC failure rather than a raw traceback."""
+    from neo4j.exceptions import ClientError
+
+    from palimpsest.kg.summary import VECTOR_INDEX_NAME
+
+    with driver.session() as session:
+        session.run("CALL db.awaitIndexes($t)", t=300)
+        try:
+            rows = list(
+                session.run(
+                    "CALL db.index.vector.queryNodes($name, $k, $probe) "
+                    "YIELD node WHERE node.target_id = $tid "
+                    "RETURN node.embedding AS embedding",
+                    name=VECTOR_INDEX_NAME,
+                    k=10,
+                    probe=list(_EMBEDDING),
+                    tid=target_id,
+                )
+            )
+        except ClientError:
+            return None
+    return rows[0]["embedding"] if rows else None
+
+
+def test_e2e_embedding_and_vector_index_survive_drop_and_reload(cli_env, tmp_path):
+    """ac-4: durability. An embedded summary loaded from a git-tracked payload dir
+    is bound AND queryable through the Summary vector index. After a full Neo4j
+    DROP (DETACH DELETE every node + DROP the vector index), re-ingesting the
+    structural layer and reloading the SAME payload restores the IDENTICAL
+    embedding value and re-provisions the vector index (the embedded summary is
+    queryable again). Idempotent restore — the vector index rides the load path,
+    git = SoT, Neo4j = re-buildable projection."""
+    from palimpsest.kg.summary import VECTOR_INDEX_NAME
+
+    assert cli.main(["ingest", "--repo", str(FIXTURES)]) == 0
+
+    payload_dir = _write_embedded_payload_dir(tmp_path / "summaries")
+    assert cli.main(["load", str(payload_dir)]) == 0
+
+    driver = cli_env.get_driver()
+    try:
+        # Bound + queryable through the vector index after the first load.
+        before = _vector_queryable_embedding(driver, CTRL_METHOD)
+        assert before is not None, (
+            "embedded summary not queryable through the vector index after load "
+            "(the index was not provisioned on the load path)"
+        )
+        assert before == _EMBEDDING  # the literal payload vector, bound as-is
+
+        # Full Neo4j drop: wipe EVERY node AND the vector index; keep git SoT.
+        with driver.session() as session:
+            session.run("MATCH (n) DETACH DELETE n")
+            session.run(f"DROP INDEX `{VECTOR_INDEX_NAME}` IF EXISTS")
+        assert _vector_queryable_embedding(driver, CTRL_METHOD) is None
+
+        # Rebuild the structural layer + reload the SAME git payload dir.
+        assert cli.main(["ingest", "--repo", str(FIXTURES)]) == 0
+        assert cli.main(["load", str(payload_dir)]) == 0
+
+        after = _vector_queryable_embedding(driver, CTRL_METHOD)
+    finally:
+        driver.close()
+
+    assert after is not None, (
+        "vector index not restored after the Neo4j drop + git reload"
+    )
+    assert after == before  # identical embedding value, index restored (idempotent)
+
+
 # --- ac-4: the CLI load path imports NO generative module (provider-free) ------
 
 

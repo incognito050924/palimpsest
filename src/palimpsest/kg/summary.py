@@ -31,7 +31,10 @@ import hashlib
 import json
 from dataclasses import dataclass
 
-from palimpsest.ir import EDGE_KIND_INFERRED, Summary
+from palimpsest.ir import EDGE_KIND_INFERRED, EMBEDDING_DIM, SUMMARY, Summary
+
+# The Summary vector index (single, closed name): cosine over EMBEDDING_DIM.
+VECTOR_INDEX_NAME = "summary_embedding_cosine"
 
 
 @dataclass(frozen=True)
@@ -44,12 +47,20 @@ class Rejection:
 
 @dataclass(frozen=True)
 class SummaryLoadResult:
-    """Outcome of a load batch: counts + the explicit rejection reasons."""
+    """Outcome of a load batch: counts + the explicit rejection reasons.
+
+    ``embedded`` is how many loaded summaries carried a (valid) embedding;
+    ``indexed`` is how many of them are actually queryable through the vector
+    index right now (0 if the index is absent/not-online) — the two make a
+    silently-unindexed vector visible instead of silently unsearchable.
+    """
 
     intended: int
     loaded: int
     rejected: int
     rejections: tuple[Rejection, ...] = ()
+    embedded: int = 0
+    indexed: int = 0
 
 
 def summary_id(target_id: str, generator: str, model: str, source_commit: str) -> str:
@@ -77,7 +88,10 @@ SET s.target_id     = $target_id,
     s.code_bound_at = $code_bound_at,
     s.confidence    = $confidence,
     s.semantic_verdict = $semantic_verdict,
-    s.prompt        = $prompt
+    s.prompt        = $prompt,
+    s.embedding     = $embedding,
+    s.embedding_model = $embedding_model,
+    s.embedding_dim = $embedding_dim
 """
 
 # Endpoints are pre-resolved above (unresolved -> the whole summary is rejected,
@@ -109,6 +123,17 @@ def _structural_reject_reason(s: Summary):
     for i, claim in enumerate(s.claims):
         if not claim.source_refs:
             return f"claim {i} has no source ref"
+    # Embedding is optional (back-compat), but if present it must be well-formed:
+    # the dimension check uses the SAME EMBEDDING_DIM as the vector index DDL, so
+    # a wrong-dim vector is rejected here rather than silently skipped by Neo4j.
+    if s.embedding is not None:
+        if len(s.embedding) != EMBEDDING_DIM:
+            return (
+                f"embedding dim mismatch: expected {EMBEDDING_DIM}, "
+                f"got {len(s.embedding)}"
+            )
+        if not (s.embedding_model and s.embedding_model.strip()):
+            return "embedding without embedding_model"
     return None
 
 
@@ -192,6 +217,9 @@ def _write(session, sid: str, s: Summary, endpoints: set[str], code_bound_at) ->
         confidence=s.confidence,
         semantic_verdict=semantic_verdict,
         prompt=s.prompt,
+        embedding=s.embedding,
+        embedding_model=s.embedding_model,
+        embedding_dim=s.embedding_dim,
     )
     session.run(
         _SUMMARIZES_MERGE,
@@ -207,6 +235,76 @@ def _write(session, sid: str, s: Summary, endpoints: set[str], code_bound_at) ->
     )
 
 
+# EMBEDDING_DIM and 'cosine' are trusted internal constants (like the baked
+# Summary label), never payload data — safe to inline into the DDL text.
+_CREATE_VECTOR_INDEX = (
+    f"CREATE VECTOR INDEX `{VECTOR_INDEX_NAME}` IF NOT EXISTS "
+    f"FOR (s:`{SUMMARY}`) ON (s.embedding) "
+    f"OPTIONS {{indexConfig: {{"
+    f"`vector.dimensions`: {EMBEDDING_DIM}, "
+    f"`vector.similarity_function`: 'cosine'}}}}"
+)
+
+
+def create_vector_index(driver) -> None:
+    """Provision the Summary embedding VECTOR INDEX (cosine, EMBEDDING_DIM).
+
+    Idempotent (``IF NOT EXISTS``), mirroring ``create_constraints``. Neo4j
+    populates a vector index asynchronously, so this AWAITs it reaching ONLINE:
+    an immediate query on a still-POPULATING index returns partial/empty results.
+    """
+    with driver.session() as session:
+        session.run(_CREATE_VECTOR_INDEX)
+        # Block until every index (this one included) finishes populating.
+        session.run("CALL db.awaitIndexes($timeout)", timeout=300)
+
+
+def _index_online(session, name: str) -> bool:
+    rec = session.run(
+        "SHOW INDEXES YIELD name, state WHERE name = $n RETURN state",
+        n=name,
+    ).single()
+    return rec is not None and rec["state"] == "ONLINE"
+
+
+def _indexed_count(session) -> int:
+    """How many embedded Summary nodes are queryable through the vector index now.
+
+    0 if the index is absent/not-online. Otherwise a k>=total queryNodes probe
+    returns every indexed node (queryNodes yields up to k regardless of score),
+    so counting the distinct hits gives the actually-indexed total — catching a
+    vector Neo4j silently failed to index (silent-unsearchable visibility)."""
+    if not _index_online(session, VECTOR_INDEX_NAME):
+        return 0
+    session.run("CALL db.awaitIndexes($timeout)", timeout=300)
+    total = session.run(
+        "MATCH (s:Summary) WHERE s.embedding IS NOT NULL RETURN count(s) AS c"
+    ).single()["c"]
+    if total == 0:
+        return 0
+    rows = session.run(
+        "CALL db.index.vector.queryNodes($name, $k, $probe) "
+        "YIELD node RETURN count(DISTINCT node) AS c",
+        name=VECTOR_INDEX_NAME,
+        k=total,
+        probe=[1.0] * EMBEDDING_DIM,
+    ).single()
+    return rows["c"] if rows else 0
+
+
+def _established_embedding_model(session):
+    """The embedding_model already bound to any Summary in the graph, or None.
+
+    A cosine vector index is single-model — comparing vectors from different
+    models is meaningless even at equal dimension — so the first model loaded
+    establishes the index's model and later loads must match it."""
+    rec = session.run(
+        "MATCH (s:Summary) WHERE s.embedding_model IS NOT NULL "
+        "RETURN s.embedding_model AS m LIMIT 1"
+    ).single()
+    return rec["m"] if rec else None
+
+
 def load_summaries(driver, summaries) -> SummaryLoadResult:
     """Load externally-generated summaries into the inferred KG layer.
 
@@ -219,8 +317,12 @@ def load_summaries(driver, summaries) -> SummaryLoadResult:
     summaries = list(summaries)
     rejections: list[Rejection] = []
     loaded = 0
+    embedded = 0
 
     with driver.session() as session:
+        # The model already established for the index (from prior loads); the
+        # first embedded summary in THIS batch establishes it if none exists yet.
+        established_model = _established_embedding_model(session)
         for s in summaries:
             sid = summary_id(s.target_id, s.generator, s.model, s.source_commit)
 
@@ -228,6 +330,21 @@ def load_summaries(driver, summaries) -> SummaryLoadResult:
             if reason is not None:
                 rejections.append(Rejection(sid, reason))
                 continue
+
+            # Single-embedding-model-per-index: a well-formed embedding whose
+            # model differs from the established one is rejected (rest still load).
+            if s.embedding is not None:
+                if established_model is None:
+                    established_model = s.embedding_model
+                elif s.embedding_model != established_model:
+                    rejections.append(
+                        Rejection(
+                            sid,
+                            f"embedding model mismatch: index established with "
+                            f"'{established_model}', got '{s.embedding_model}'",
+                        )
+                    )
+                    continue
 
             endpoints = _endpoints(s)
             unresolved = sorted(endpoints - _resolve(session, endpoints))
@@ -252,10 +369,16 @@ def load_summaries(driver, summaries) -> SummaryLoadResult:
 
             _write(session, sid, s, endpoints, _committed_at(session, s.target_id))
             loaded += 1
+            if s.embedding is not None:
+                embedded += 1
+
+        indexed = _indexed_count(session)
 
     return SummaryLoadResult(
         intended=len(summaries),
         loaded=loaded,
         rejected=len(rejections),
         rejections=tuple(rejections),
+        embedded=embedded,
+        indexed=indexed,
     )

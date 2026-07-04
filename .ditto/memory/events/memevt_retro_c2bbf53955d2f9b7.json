@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1.0",
+  "event_id": "memevt_retro_c2bbf53955d2f9b7",
+  "event_type": "analysis",
+  "actor": {
+    "kind": "agent",
+    "role": "retrospective"
+  },
+  "text": "[residual] 훗날 네트워크 노출 시 authn 상속 없음\n[residual] caller가 전체 임베딩 Summary KNN 가능하나 단일테넌트 내부도구\n[residual] KNN 실행·적재 배치 주체 미기록\n[residual] 로컬 caller의 비싼 KNN 다발 가능하나 비신뢰 경로 없음\n[residual] embedding_model은 공개 라벨\n[residual] 요약이 PII 담으면 벡터가 운반하나 불변식이 배제\n[residual] 요약 코퍼스가 개인정보 포함 시에만(불변식 배제)\n[residual] 1536 리터럴이 DDL·검증기 중복 drift 위험 — impl에서 EMBEDDING_DIM 단일정의로 완화\n[close_reason] 임베딩 슬라이스 pre-mortem 완료: 23 카테고리(8 out_of_scope, 15 resolved). 3개 HIGH 발견·수용(단일모델 불변식·branch 앵커·stale 부착) 계획 요건화, medium(async ONLINE·loaded/indexed 카운트·EMBEDDING_DIM 단일상수·limit clamp) 반영.\n[close_reason] relevance-judge skip + opponent refute stands: 인증 경로 없음(라이브러리+내부 CLI, 엔드포인트 미추가)\n[close_reason] RBAC/ABAC/tenant 모델 부재; 수정할 인가 표면 없음\n[close_reason] 감사로그 요구 부재; load는 generator/model/created_at 귀속\n[close_reason] surviving HIGH 발견·수용: 단일 인덱스가 다중 embedding_model 공간 혼합 시 조용한 순위오염 → 완화: 적재가 인덱스당 단일 embedding_model 불변식 강제(다른 모델 reject-with-reason). 계획 요건화.\n[close_reason] surviving 없음(medium note): limit=0 시 KNN raise → limit>=1 clamp(계획 반영)\n[close_reason] surviving 없음: 단일 writer MERGE 멱등 + INDEX IF NOT EXISTS\n[close_reason] surviving 없음(low): 5-community가 vector 지원 5.x resolve; 미핀은 문서화 위험\n[close_reason] surviving 없음: per-summary reject 원자적; 중단은 재실행 IF NOT EXISTS+MERGE 복구\n[close_reason] surviving 없음: ~6KB/summary, 코퍼스 수백=수MB; HNSW top-k 단일콜\n[close_reason] 네트워크/엔드포인트 없음; replay는 MERGE 멱등·INDEX IF NOT EXISTS로 무해\n[close_reason] surviving 없음: from_dict data.get() 옵셔널 패턴으로 back-compat(계획 반영)\n[close_reason] refuted: 라벨/reltype 상수 baked, 데이터는 param, DDL 상수만 — 싱크 없음\n[close_reason] 신규 필드는 float+모델명+int, 시크릿 없음; 크리덴셜 불변\n[close_reason] Summary=코드문서(PII 없음); 벡터는 수치; load는 카운트·거부사유만 출력\n[close_reason] 규제 데이터클래스·PII·동의 표면 없음\n[close_reason] surviving HIGH 발견·수용: 전역 KNN이 브랜치 앵커 부재로 ADR-20260703 브랜치 스코프 정체성 위반 → 완화: 각 hit에 branch 투영 + branches 필터(reconcile_recall 미러). 계획 요건화.\n[close_reason] surviving 없음(medium): loaded/indexed 카운트 + EMBEDDING_DIM 단일상수(계획 반영)\n[close_reason] surviving 없음(medium): async populate → durability 테스트가 인덱스 ONLINE 대기(계획 반영)\n[close_reason] surviving 없음: _result 형식·__all__ export·create_vector_index 병렬패턴 재사용(계획 반영)\n[close_reason] surviving 없음: query_vector 오류는 Neo4j loud fail; 사전 검증은 계획 반영(완결성)\n[close_reason] 차원은 고정 리터럴 상수(1536), env config 아님; 신규 플래그 없음\n[close_reason] surviving HIGH 발견·수용: recall_semantic이 stale 미부착 → 낡은 요약이 신선 top-k → 완화: target committed_at 조회+_stale 재사용해 stale 부착. 계획 요건화.\n[close_reason] surviving 없음: 최소 슬라이스; embedding_model/dim은 단일모델 불변식 가드로 load-bearing화",
+  "created_at": "2026-07-04T03:02:30.465Z",
+  "status": "pending",
+  "sources": [],
+  "confidence_kind": "EXTRACTED",
+  "sensitivity": "internal",
+  "governs": []
+}

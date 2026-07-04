@@ -12,8 +12,26 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from palimpsest.ir import CLASS, METHOD, Summary, SummaryClaim
+from palimpsest.ir import CLASS, EMBEDDING_DIM, METHOD, Summary, SummaryClaim
 from palimpsest.kg import load_summaries, summary_id
+from palimpsest.kg.summary import VECTOR_INDEX_NAME, create_vector_index
+
+
+def _vec(value: float = 0.1) -> list[float]:
+    """A literal, well-formed embedding of the index dimension (no model call)."""
+    return [value] * EMBEDDING_DIM
+
+
+def _embedded(payload, *, generator=None, model="embed-model-v1", value=0.1):
+    """The given payload with an external embedding attached (still grounded)."""
+    kwargs = dict(
+        embedding=_vec(value),
+        embedding_model=model,
+        embedding_dim=EMBEDDING_DIM,
+    )
+    if generator is not None:
+        kwargs["generator"] = generator
+    return replace(payload, **kwargs)
 
 
 def node_count(driver) -> int:
@@ -265,6 +283,99 @@ def test_summary_id_never_shadows_a_code_node(ingested, summary_payload):
     # Two distinct nodes share the id: the planted Method and the new Summary.
     assert ("Method",) in labelsets and ("Summary",) in labelsets
     assert summary is not None and summary["t"] == summary_payload.target_id
+
+
+# --- ac-1: an external embedding binds to the Summary node (provider-free) -----
+
+
+def test_embedding_binds_to_summary_and_reload_is_idempotent(ingested, summary_payload):
+    payload = _embedded(summary_payload)
+    res = load_summaries(ingested, [payload])
+    assert res.loaded == 1 and res.embedded == 1
+
+    def read():
+        with ingested.session() as session:
+            return session.run(
+                "MATCH (s:Summary {target_id: $t}) "
+                "RETURN s.embedding AS e, s.embedding_model AS m, "
+                "s.embedding_dim AS d",
+                t=payload.target_id,
+            ).single()
+
+    first = read()
+    assert first["e"] == payload.embedding
+    assert first["m"] == payload.embedding_model
+    assert first["d"] == EMBEDDING_DIM
+
+    # MERGE-on-id: re-loading the identical payload changes nothing.
+    load_summaries(ingested, [payload])
+    second = read()
+    assert second["e"] == first["e"]
+    assert second["m"] == first["m"]
+    assert summary_count(ingested) == 1
+
+
+def test_summary_without_embedding_still_loads(ingested, summary_payload):
+    """Back-compat: an embedding-less payload loads unchanged (no embedding prop)."""
+    res = load_summaries(ingested, [summary_payload])
+    assert res.loaded == 1 and res.embedded == 0
+    with ingested.session() as session:
+        e = session.run(
+            "MATCH (s:Summary {target_id: $t}) RETURN s.embedding AS e",
+            t=summary_payload.target_id,
+        ).single()["e"]
+    assert e is None
+
+
+def test_wrong_dimension_embedding_is_rejected_rest_load(ingested, summary_payload):
+    good = _embedded(summary_payload, generator="gen-good")
+    bad = replace(
+        _embedded(summary_payload, generator="gen-bad"),
+        embedding=[0.1] * (EMBEDDING_DIM - 1),
+    )
+    res = load_summaries(ingested, [good, bad])
+    assert res.intended == 2 and res.loaded == 1 and res.rejected == 1
+    assert res.embedded == 1
+    assert "dim" in res.rejections[0].reason.lower()
+    assert summary_count(ingested) == 1
+
+
+def test_embedding_model_mismatch_is_rejected(ingested, summary_payload):
+    """Single-embedding-model-per-index: a different model than the one already
+    established for the index is rejected (cosine across models is meaningless)."""
+    load_summaries(ingested, [_embedded(summary_payload, model="model-A")])
+    other = _embedded(summary_payload, generator="gen-other", model="model-B")
+    res = load_summaries(ingested, [other])
+    assert res.loaded == 0 and res.rejected == 1
+    assert "model" in res.rejections[0].reason.lower()
+
+
+def test_vector_index_makes_embedded_summary_queryable(ingested, summary_payload):
+    payload = _embedded(summary_payload, value=0.2)
+    res = load_summaries(ingested, [payload])
+    assert res.embedded == 1
+
+    create_vector_index(ingested)  # CREATE ... IF NOT EXISTS + AWAIT ONLINE
+
+    with ingested.session() as session:
+        hit = session.run(
+            "CALL db.index.vector.queryNodes($name, 1, $q) "
+            "YIELD node RETURN node.target_id AS t",
+            name=VECTOR_INDEX_NAME,
+            q=payload.embedding,
+        ).single()
+    assert hit is not None and hit["t"] == payload.target_id
+
+
+def test_load_result_reports_loaded_vs_indexed(ingested, summary_payload):
+    """With the index provisioned first, the result surfaces how many embedded
+    summaries are actually queryable through it (loaded-vs-indexed visibility)."""
+    create_vector_index(ingested)
+    a = _embedded(summary_payload, generator="gen-a")
+    b = _embedded(summary_payload, generator="gen-b")
+    res = load_summaries(ingested, [a, b])
+    assert res.embedded == 2
+    assert res.indexed == 2
 
 
 # --- ac-4: importing the kg path pulls in NO generative module ----------------
