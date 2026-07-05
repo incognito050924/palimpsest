@@ -36,7 +36,15 @@ palimpsest는 정초 VISION에서 **생성형 큐레이터**(단순 아카이비
 
 5. **provenance 자기귀속 정직성**: `generator`/`model` 필드가 palimpsest 자기 자신을 가리키지 않고 실제 생성 모델을 기록한다.
 
-6. **CodeQL 축 통일**: 같은 격리-생산자/git-물질화 패턴을 CodeQL에도 적용한다 — CodeQL은 빌드 가능한 HEAD에서만 실행(정밀 overlay), findings를 git-SoT에 물질화 후 로더로 적재, 이력 spine은 build-less tree-sitter 유지, coverage-asymmetry를 provenance로 정직 표기. build-dependency는 HEAD-only로 격리하고 전이력 균일성은 tree-sitter spine이 담보한다.
+6. **정밀 콜그래프 축 — 주(主) in-house tree-sitter spine + 보조(옵션) CodeQL overlay**: 정밀도의 주경로는 palimpsest가 **소유하는 build-less tree-sitter 정밀 spine**이다. 현행 name-based over-matching(`src/palimpsest/extract/java.py` — `CALLS`가 호출을 그 단순명을 가진 **모든** 메서드에 연결)을 in-house로 개선한다 — tree-sitter `tags.scm` + `locals` 스코프 해소 + receiver-type 휴리스틱으로 좁힌다. 이 경로는 다언어·전이력 균일(임의 git 체크아웃, 빌드 불요)·palimpsest 소유이며, test-impact 필요(design-notes D §0 pain)를 푸는 **1급 경로**다.
+
+   **CodeQL은 선택적 보조(auxiliary) HEAD-only overlay**이며 spine의 의존이 **아니다**. 빌드 가능한 HEAD에서 ① 정밀 부스트(virtual dispatch, dataflow) ② security/taint Risk 산출을 더한다 — build-less가 대체하지 못하는 **유일한 역할이 interprocedural taint(보안 Risk)**다. curate와 동일한 격리-생산자/git-물질화 패턴(findings를 git-SoT에 물질화 후 로더로 적재), coverage-asymmetry를 provenance로 정직 표기. 지금은 드롭 가능하며, 결정론적 security-Risk 생산자가 실제로 필요해질 때 채택한다. build-dependency는 HEAD-only로 격리하고 전이력 균일성은 tree-sitter spine이 담보한다.
+
+   **연구 근거(2026 웹 조사)**: build-less + 다언어 + 정밀 콜그래프를 동시에 만족하는 성숙한 off-the-shelf 도구는 **없다**(트릴레마). 따라서 build-less 정밀은 마법 도구에서 조달하는 게 아니라 **소유(tree-sitter 개선)**해야 하고, CodeQL은 대체 불가한 니치(security-Risk)를 위해 옵션 보조로만 남긴다.
+   - 정밀 도구는 전부 **빌드 필요**(전이력 균일성 위배): SCIP indexer(scip-java/python/typescript, https://sourcegraph.com/docs/code-search/code-navigation/precise_code_navigation), LSP 서버, Kythe, Glean.
+   - build-less 다언어 도구는 **구문·단일 파일 한정**(콜그래프 없음): tree-sitter `tags.scm`/`locals`(로컬 스코프만, https://tree-sitter.github.io/tree-sitter/4-code-navigation.html), ast-grep(https://ast-grep.github.io/).
+   - **stack-graphs**(build-less cross-file 후보)는 **2025-09-09 아카이브**(read-only; 마지막 릴리스 2024-12-13; Kotlin 미지원; pre-1.0 룰셋), https://github.com/github/stack-graphs.
+   - **sound한 정적 콜그래프는 없다** — CodeQL조차 reflection/DI/dynamic-dispatch 엣지를 놓친다(ISSTA 2024 "Total Recall? How Good Are Static Call Graphs Really?", https://dl.acm.org/doi/10.1145/3650212.3652114). test-impact의 유일한 ground truth는 런타임 coverage(build+run, HEAD-only)다.
 
 7. **임베딩 분리 명시**: 임베딩 축은 본 회복 범위 밖. 외부 single-model·차원 pin 유지(`ADR-20260704` 무저촉).
 
@@ -52,6 +60,7 @@ palimpsest는 정초 VISION에서 **생성형 큐레이터**(단순 아카이비
 
 - **Candidate A — provider-free 영구유지 (현행 동결)**: 기각. VISION #6(생성형 1급, "재론 아님")과 정초 `ADR-20260626 §2`(LLM 합성 포함)를 초과폐기(월권)한다. 생성 자유를 정당화한 전제(standalone)로 오히려 그 자유를 뺏는 **역방향 drift**를 남긴다. "deferred, not forbidden"은 텍스트상 참이나 회복 슬라이스가 0이라 실무적으로 무기한 lock-OUT과 구별되지 않는다. 강화형(A′: 외부 생산자 파이프라인 출하)조차 생성을 제품 경계 밖에 영원히 두어 "palimpsest가 생성형 큐레이터"라는 명제를 만족 못 하고, standalone 자기완결(`VISION.md:46,50`)을 외부 역의존으로 훼손한다.
 - **Candidate C — 전면 역전 (생성+판정+임베딩 모두 in-process)**: 기각. content-verdict를 in-process로 끌어들이는 순간 **E4(생성자≠검증자)가 파괴**되어 자기-인증 고리가 닫힌다(`ADR-20260701:33` 위배). hermetic probe 5경로 붕괴(E1), 비결정 생성 in-process로 git-determinism 위협(E3), 그리고 SC1 scope-creep(회복은 요약 합성 1급이지 판정·임베딩 전부의 in-process화가 아니다). B가 content-verdict를 외부로 유지하는 것과 C의 결정적 차이가 이 지점이다.
+- **build-less 정밀 콜그래프를 off-the-shelf 도구로 조달 (§결정6 축)**: 기각 — 그런 도구가 없다(트릴레마, 위 연구 근거). 검토·기각한 후보: **stack-graphs**(build-less cross-file였으나 2025-09-09 아카이브·read-only), **SCIP indexer / LSP / Kythe / Glean**(정밀하나 빌드 필요 → 전이력 균일성 위배). 결론: build-less 정밀은 소유(tree-sitter spine 개선)하고, CodeQL은 대체 불가 니치(security-Risk)를 위한 옵션 보조로만 둔다.
 
 ## 거버넌스 (ADR-0020 / 헌장 §4-10)
 

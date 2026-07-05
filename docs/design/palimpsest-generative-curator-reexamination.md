@@ -287,17 +287,23 @@ palimpsest/                              불변식 상 위치
 
 **충돌**(design-notes §C.2/C.3, `design-notes.md:200-211`): 사용자 soft 선호는 "palimpsest가 CodeQL을 **직접** 실행"(`C-Q2`, `design-notes.md:235`). 그러나 CodeQL 정확도는 **빌드/컴파일 추적**에 의존한다 — 옛 커밋은 빌드가 안 되고(`:201`), 빌드 환경 의존이라 git만으로 재구축이 안 닫히며(`:202`), per-commit DB 빌드는 비현실적(`:203`). 이는 palimpsest의 전이력 backfill(`git archive` 트리 파싱, 빌드리스) 불변식과 **정면 충돌**한다.
 
-**결정 — 동일한 격리-생산자 / git-materialize 패턴으로 통일한다** (§5의 B 패턴을 CodeQL 축에 적용):
+**결정 — 정밀도의 주경로는 palimpsest가 소유하는 build-less tree-sitter spine이고, CodeQL은 선택적 보조 overlay다** (사용자 결정 "A + CodeQL 보조"):
 
-1. **CodeQL은 빌드 가능한 HEAD에서만 실행**(정밀 overlay, `design-notes.md:209`). 옛 커밋 빌드를 시도하지 않는다.
-2. **findings를 git-SoT에 물질화** → 기존 inferred/deterministic 로더로 적재. curate 패턴과 동형: 비결정/환경의존 단계를 git 커밋에 흡수, 로더 입력은 결정론적 파일.
-3. **HEAD-only + 정직한 coverage-asymmetry provenance**: "HEAD-only 정밀 CodeQL 엣지" vs "전이력 tree-sitter 엣지"를 provenance로 구분(`design-notes.md:210`, `C-Q3`/`C-Q6`). 회상은 CodeQL findings가 이력을 안 덮음을 정직하게 표기.
-4. **이력 spine은 tree-sitter 유지**(빌드리스·균일, `design-notes.md:208`). CodeQL을 이력 엔진으로 쓰지 않는다 — 이건 §7에서 명시 기각.
-5. **직접 실행 vs DITTO 소비**(`C-Q2`)는 이 패턴 안에서 자유도로 남긴다: 어느 쪽이든 산출물이 "HEAD findings → git 물질화 → 로더"를 통과하면 불변식은 동일하게 보존된다. 즉 "직접 실행" 사용자 선호는 이 패턴 하에서 **수용 가능**(build-dependency는 HEAD로 격리, 전이력 균일성은 tree-sitter spine이 유지).
+1. **주(PRIMARY) = 소유한 build-less tree-sitter 정밀 spine**. 현행 name-based over-matching(`src/palimpsest/extract/java.py` — `CALLS`가 호출을 그 단순명을 가진 **모든** 메서드에 연결)을 in-house로 개선한다: tree-sitter `tags.scm` + `locals` 스코프 해소 + receiver-type 휴리스틱으로 좁힌다. 다언어·전이력 균일(임의 git 체크아웃, 빌드 불요)·palimpsest 소유이며, test-impact 필요(design-notes D §0 pain)를 푸는 1급 경로다. CodeQL은 이 spine의 의존이 **아니다**.
+2. **보조(OPTIONAL AUXILIARY) = CodeQL HEAD-only overlay**. 빌드 가능한 HEAD에서만 실행하며 ① 정밀 부스트(virtual dispatch, dataflow) ② security/taint Risk를 더한다 — build-less가 대체 못 하는 **유일한 역할이 interprocedural taint(보안 Risk)**다. 지금은 드롭 가능하고, 결정론적 security-Risk 생산자가 실제로 필요해질 때 채택한다. 옛 커밋 빌드는 시도하지 않는다.
+3. **CodeQL도 같은 격리-생산자 / git-materialize 패턴**(§5의 B 패턴): findings를 git-SoT에 물질화 → 기존 inferred/deterministic 로더로 적재. 비결정/환경의존 단계를 git 커밋에 흡수, 로더 입력은 결정론적 파일.
+4. **정직한 coverage-asymmetry provenance**: "HEAD-only 정밀 CodeQL 엣지" vs "전이력 tree-sitter 엣지"를 provenance로 구분(`design-notes.md:210`, `C-Q3`/`C-Q6`). 회상은 CodeQL findings가 이력을 안 덮음을 정직하게 표기.
+5. **직접 실행 vs DITTO 소비**(`C-Q2`)는 CodeQL 보조를 채택할 때의 자유도로 남긴다: 어느 쪽이든 산출물이 "HEAD findings → git 물질화 → 로더"를 통과하면 불변식은 동일하게 보존된다.
+
+**연구 근거 — 왜 정밀 spine을 소유해야 하나 (2026 웹 조사)**: build-less + 다언어 + 정밀 콜그래프를 동시에 만족하는 성숙한 off-the-shelf 도구는 **없다**(트릴레마). 따라서 build-less 정밀은 마법 도구에서 조달하는 게 아니라 소유(tree-sitter 개선)해야 한다.
+- 정밀 도구는 전부 **빌드 필요**(전이력 균일성 위배): SCIP indexer(scip-java/python/typescript, https://sourcegraph.com/docs/code-search/code-navigation/precise_code_navigation), LSP 서버, Kythe, Glean.
+- build-less 다언어 도구는 **구문·단일 파일 한정**(콜그래프 없음): tree-sitter `tags.scm`/`locals`(로컬 스코프만, https://tree-sitter.github.io/tree-sitter/4-code-navigation.html), ast-grep(https://ast-grep.github.io/).
+- **stack-graphs**(build-less cross-file 후보)는 **2025-09-09 아카이브**(read-only; 마지막 릴리스 2024-12-13; Kotlin 미지원; pre-1.0 룰셋), https://github.com/github/stack-graphs.
+- **sound한 정적 콜그래프는 없다** — CodeQL조차 reflection/DI/dynamic-dispatch 엣지를 놓친다(ISSTA 2024 "Total Recall? How Good Are Static Call Graphs Really?", https://dl.acm.org/doi/10.1145/3650212.3652114). test-impact의 유일한 ground truth는 런타임 coverage(build+run, HEAD-only)다.
 
 **CodeQL Risk의 no-laundering 정합**(`C-Q5`, `design-notes.md:228-229`): CodeQL risk는 도구-유래 결정론(빌드 있으면 규칙 재현)이라 순수 deterministic과 LLM-inferred 사이에 있다. `extracted_by:'codeql'` provenance 마커로 "누가 찾았나"를 박아 세탁 금지 불변식과 정합시킨다 — 세부 edge_kind 표기 규칙은 CodeQL 슬라이스에서 확정(이 문서 범위 밖, design-notes에 개방 질문으로 이미 존재).
 
-요지: 직접 실행이든 소비든, **build-dependency는 HEAD-only로 격리하고 전이력 균일성은 build-less tree-sitter spine이 담보**한다. 두 축이 같은 격리-생산자/git-materialize 패턴을 공유하므로 충돌이 해소된다.
+요지: **정밀 spine은 palimpsest가 소유하는 build-less tree-sitter 개선이 주경로**이고(다언어·전이력 균일), CodeQL은 정밀 부스트 + 대체 불가 니치(보안 Risk)를 위한 선택적 HEAD-only 보조다. build-dependency는 CodeQL 보조에만 있고 HEAD-only로 격리되며, 전이력 균일성은 build-less tree-sitter spine이 담보하므로 충돌이 해소된다.
 
 ---
 

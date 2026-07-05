@@ -11,7 +11,7 @@
 - **change-target** = 이 작업이 건드리는 모듈/파일/계약을 설계가 허용하는 만큼 정확히.
 - **verification** = 이 작업을 닫는 관찰 가능한 검사(대개 특정 테스트).
 - **depends-on** = 먼저 착지해야 하는 작업.
-- 순서: **First slice(T1–T4)**가 Candidate B의 최소 종단 경로(격리 생산자 → git 물질화 → 기존 로더 → 격리 증명 → 재구축 결정론)를 세운다. **Later(T5–T8)**는 전수성·정직성·CodeQL 트랙·거버넌스 마무리다.
+- 순서: **First slice(T1–T4)**가 Candidate B의 최소 종단 경로(격리 생산자 → git 물질화 → 기존 로더 → 격리 증명 → 재구축 결정론)를 세운다. **Later(T5–T10)**는 전수성·정직성·정밀 spine(주)·CodeQL 보조(옵션)·거버넌스 마무리다.
 - 각 작업은 헌장 §4-5대로 **red-first 또는 관찰 증거**로 닫는다. 코드 동작 작업(T1–T4, T6)은 실패 테스트 먼저. 조사/문서 작업(T5, T7 일부, T8)은 검사/리뷰 증거로 닫는다.
 
 ---
@@ -90,17 +90,29 @@
 - **depends-on**: **T1–T4 착지 후**(불변식 정련은 구현이 실제로 격리를 실현한 뒤에 문서화). ADR-0020: intent 완화는 사용자 소유(이미 승인됨) — 이 편집은 방법의 기록.
 - 근거: ADR §관계(정련/부분 supersede) + 설계 §8 거버넌스.
 
-### T9 · (별도 트랙) CodeQL HEAD-only 생산자
+### T9-PRIMARY · (주 트랙) build-less tree-sitter 정밀 spine 개선 — name-based over-matching 축소
 
-- **분리 표기**: 이 트랙은 curate 축과 **같은 격리-생산자/git-물질화 패턴을 공유하지만 독립 슬라이스**다. curate(T1–T4) 착지에 의존하지 않고 병렬 진행 가능. 세부 edge_kind 표기 규칙은 CodeQL 슬라이스에서 확정(현재 open).
-- **change-target**: 신설 CodeQL 생산자(위치는 CodeQL 슬라이스에서 확정; curate와 동형으로 격리 + optional-dep). CodeQL을 **빌드 가능한 HEAD에서만** 실행(정밀 overlay) → findings를 git-SoT에 물질화 → 기존 inferred/deterministic 로더로 적재. 이력 spine은 build-less tree-sitter 유지(CodeQL을 이력 엔진으로 쓰지 않음). `extracted_by:'codeql'` provenance 마커 + coverage-asymmetry(HEAD-only) 정직 표기.
+- **주경로 표기**: 정밀도의 **1급 경로**이며 palimpsest가 소유한다. 아래 T10(CodeQL)의 **선행이자 상위**다 — CodeQL 없이도 test-impact 필요를 푸는 경로이므로 CodeQL 트랙보다 **먼저** 착지시킨다.
+- **change-target**: `src/palimpsest/extract/*.py`(현행 `java.py` 등). 현행 name-based over-matching(`CALLS`가 호출을 그 단순명을 가진 **모든** 메서드에 연결)을 tree-sitter `tags.scm` + `locals` 스코프 해소 + receiver-type 휴리스틱으로 좁힌다. build-less·전이력 균일(임의 git 체크아웃, 빌드 불요) 유지. 다언어로 확장 가능한 구조(언어별 `tags.scm`/`locals` 쿼리 분리).
 - **verification**:
-  1. HEAD findings가 git-물질화 후 로더를 통과해 provenance 마커를 갖고 적재됨.
+  1. **정밀도 테스트**: fixture에서 현행 name-based `CALLS`의 over-matching(단순명 충돌 시 잘못 연결된 엣지) 대비 **줄어든 엣지 집합**을 단언하는 테스트. 개선 전 엣지 수 > 개선 후(정확한) 엣지 수를 fixture로 고정.
+  2. **다언어 노트**: 최소 1개 언어(현행 Java)로 착지하되, `tags.scm`/`locals` 쿼리가 언어별로 분리되어 다언어 확장 가능함을 구조로 확인.
+- **depends-on**: 없음(독립 주 트랙, First slice와 병렬 가능). **T10(CodeQL)보다 먼저.**
+- **red-first**: 예 — over-matching 축소는 코드 동작. 개선 전 over-match를 잡는 실패 테스트(잘못 연결된 엣지 존재 assert) → tags.scm/locals/receiver-type 해소 구현 → green.
+- 근거: ADR §결정6(주 in-house tree-sitter spine); 설계 §6.2(1); design-notes D §0 pain(test-impact).
+
+### T10 · (보조 트랙, 옵션) CodeQL HEAD-only overlay — security/taint Risk + 선택적 정밀 부스트
+
+- **보조 표기**: 이 트랙은 **선택적 보조(auxiliary)**이며 정밀 spine(T9-PRIMARY)의 의존이 **아니다**. curate 축과 같은 격리-생산자/git-물질화 패턴을 공유하는 독립 슬라이스로, curate(T1–T4)·T9-PRIMARY 착지에 의존하지 않고 병렬 가능하나 **주경로가 아니다**. 지금은 드롭 가능하며, 결정론적 security-Risk 생산자가 실제로 필요해질 때 채택한다. 세부 edge_kind 표기 규칙은 CodeQL 슬라이스에서 확정(현재 open).
+- **역할(니치)**: 빌드 가능한 HEAD에서 ① **security/taint Risk 산출** — build-less가 대체 못 하는 **유일한 역할(interprocedural taint)**, 이것이 채택 이유 ② 선택적 HEAD 정밀 부스트(virtual dispatch, dataflow). spine이 이미 build-less 정밀을 제공하므로 ②는 부가이고, 채택의 핵심 근거는 ①이다.
+- **change-target**: 신설 CodeQL 생산자(위치는 CodeQL 슬라이스에서 확정; curate와 동형으로 격리 + optional-dep). CodeQL을 **빌드 가능한 HEAD에서만** 실행 → findings를 git-SoT에 물질화 → 기존 inferred/deterministic 로더로 적재. 이력 spine은 build-less tree-sitter 유지(CodeQL을 이력 엔진으로 쓰지 않음). `extracted_by:'codeql'` provenance 마커 + coverage-asymmetry(HEAD-only) 정직 표기.
+- **verification**:
+  1. HEAD findings(특히 security/taint Risk)가 git-물질화 후 로더를 통과해 provenance 마커를 갖고 적재됨.
   2. **coverage-asymmetry 정직성**: 회상이 "CodeQL 엣지는 HEAD-only, tree-sitter 엣지는 전이력"을 구분해 표기함을 확인.
   3. 이력 backfill 균일성(tree-sitter spine)이 CodeQL 추가로 깨지지 않음(기존 backfill 테스트 green).
-- **depends-on**: 없음(별도 트랙). curate 패턴(T1–T3) 착지가 참조 구현이 되면 재사용 가능하나 필수 아님.
+- **depends-on**: 없음(별도 보조 트랙). spine이 정밀 주경로이므로 이 트랙 없이도 정밀 spine은 성립. curate 패턴(T1–T3) 착지가 참조 구현이 되면 재사용 가능하나 필수 아님.
 - **red-first**: 예(적재/표기는 코드 동작) — CodeQL 슬라이스에서 세부 확정.
-- 근거: ADR §결정6; 설계 §6.2, §7.3 SOFT(C-Q2/C-Q5 open).
+- 근거: ADR §결정6(보조 옵션 CodeQL, 니치=security-Risk); 설계 §6.2(2), §7.3 SOFT(C-Q2/C-Q5 open).
 
 ---
 
@@ -114,14 +126,15 @@ First slice (Candidate B 종단):
     └─▶ T7(provenance 정직성)
 
 Later / 병렬:
-  T5(VG1 ADR 전수 스윕)         — 독립
-  T9(CodeQL HEAD-only 트랙)      — 독립(같은 패턴, 별도 슬라이스)
-  T8(ADR-20260701 supersede 편집) — T1–T4 착지 후
+  T5(VG1 ADR 전수 스윕)              — 독립
+  T9-PRIMARY(tree-sitter 정밀 spine) — 독립 주 트랙, T10보다 먼저
+    └─▶ T10(CodeQL HEAD-only 보조)   — 독립 보조(옵션), spine의 의존 아님
+  T8(ADR-20260701 supersede 편집)    — T1–T4 착지 후
 ```
 
 ## 미해결 질문
 
-- CodeQL 슬라이스의 edge_kind 표기 규칙(`C-Q5`), 이력 spine 추출기(`C-Q1`), 직접 실행 vs DITTO 소비(`C-Q2`)는 T9 진입 시 확정 — 이 백로그 범위 밖(design-notes 개방 질문).
+- CodeQL 슬라이스의 edge_kind 표기 규칙(`C-Q5`), 이력 spine 추출기(`C-Q1`), 직접 실행 vs DITTO 소비(`C-Q2`)는 T10(CodeQL 보조 트랙) 진입 시 확정 — 이 백로그 범위 밖(design-notes 개방 질문).
 - T5(VG1)에서 5개 ADR 중 좁혀야 할 문장이 발견되면, 그 정련은 T8 확장 또는 해당 ADR별 후속 항목으로 분기(현재는 "발견 시 분기"로 열어 둠).
 
 ## VG1 후속 — supersede footprint 확장 (검증 노드 발견, 2026-07-06)
