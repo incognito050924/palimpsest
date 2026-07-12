@@ -91,6 +91,142 @@ def test_calls_edge_name_based(ir):
     assert not any(e.src == e.dst for e in ir.edges_of("CALLS"))
 
 
+REPORT = "kr.co.ecoletree.service.report.service.ReportService"
+
+
+def test_calls_precise_receiver_type_no_over_match(ir):
+    # Controller field `service` is typed CommuteService; the body call
+    # `service.selectCodeList(param)` must resolve ONLY to CommuteService's
+    # method, never to the same-simple-named method on the unrelated
+    # ReportService (name-based resolution over-matches both).
+    caller = CTRL + "#selectCodeList(Map)"
+    right = IFACE + "#selectCodeList(Map)"
+    wrong = REPORT + "#selectCodeList(Map)"
+    # all three nodes are real -> the collision is genuine
+    assert ir.node(caller) is not None
+    assert ir.node(right) is not None
+    assert ir.node(wrong) is not None
+    # precise edge kept
+    assert ir.has_edge("CALLS", caller, right)
+    # over-match edge to the unrelated type suppressed
+    assert not ir.has_edge("CALLS", caller, wrong)
+
+
+def _extract_ir(tmp_path, files):
+    """Extract an IR from an inline {relpath: java-source} corpus."""
+    for rel, src in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(src)
+    return extract(tmp_path, PROV, repo_name="T")
+
+
+def test_calls_interface_receiver_reaches_impl_not_unrelated(tmp_path):
+    # receiver `svc` is typed by the interface Svc; the call must reach BOTH the
+    # interface method AND the implementing class (test-impact reachability), but
+    # NOT the coincidentally same-named method on the unrelated Other.
+    ir = _extract_ir(tmp_path, {
+        "Svc.java": "package p;\npublic interface Svc { String sel(String a); }\n",
+        "SvcImpl.java": "package p;\npublic class SvcImpl implements Svc {\n"
+                        "  public String sel(String a) { return a; }\n}\n",
+        "Other.java": "package p;\npublic class Other { public String sel(String a) { return a; } }\n",
+        "Ctrl.java": "package p;\npublic class Ctrl {\n  Svc svc;\n"
+                     "  String run(String a) { return svc.sel(a); }\n}\n",
+    })
+    caller = "p.Ctrl#run(String)"
+    assert ir.node(caller) is not None
+    assert ir.has_edge("CALLS", caller, "p.Svc#sel(String)")
+    assert ir.has_edge("CALLS", caller, "p.SvcImpl#sel(String)")
+    assert not ir.has_edge("CALLS", caller, "p.Other#sel(String)")
+
+
+def test_calls_inherited_method_excludes_unrelated_same_name(tmp_path):
+    # d:Derived, foo() inherited from Base -> link Base#foo; the same-named method
+    # on the unrelated class must NOT be linked (no name-based over-match on the
+    # inherited path).
+    ir = _extract_ir(tmp_path, {
+        "Base.java": "package p;\npublic class Base { public String foo(String a) { return a; } }\n",
+        "Derived.java": "package p;\npublic class Derived extends Base { }\n",
+        "Unrelated.java": "package p;\npublic class Unrelated { public String foo(String a) { return a; } }\n",
+        "Ctrl.java": "package p;\npublic class Ctrl {\n  Derived d;\n"
+                     "  String run(String a) { return d.foo(a); }\n}\n",
+    })
+    caller = "p.Ctrl#run(String)"
+    assert ir.node(caller) is not None
+    assert ir.has_edge("CALLS", caller, "p.Base#foo(String)")
+    assert not ir.has_edge("CALLS", caller, "p.Unrelated#foo(String)")
+
+
+def test_calls_local_in_anonymous_class_does_not_shadow_field(tmp_path):
+    # `thing` is a field typed Svc; an unrelated local `thing` typed Other lives in
+    # an anonymous class declared INSIDE the method body (the common listener/Runnable
+    # position). The inner local must not poison the field's type: `thing.sel(a)` in
+    # call() must resolve to Svc, not Other.
+    ir = _extract_ir(tmp_path, {
+        "Svc.java": "package p;\npublic interface Svc { String sel(String a); }\n",
+        "Other.java": "package p;\npublic class Other { public String sel(String a) { return a; } }\n",
+        "Ctrl.java": (
+            "package p;\n"
+            "public class Ctrl {\n"
+            "  Svc thing;\n"
+            "  String call(String a) {\n"
+            "    Runnable r = new Runnable() {\n"
+            "      public void run() { Other thing = new Other(); thing.sel(\"x\"); }\n"
+            "    };\n"
+            "    return thing.sel(a);\n"
+            "  }\n"
+            "}\n"
+        ),
+    })
+    caller = "p.Ctrl#call(String)"
+    assert ir.node(caller) is not None
+    assert ir.has_edge("CALLS", caller, "p.Svc#sel(String)")
+    assert not ir.has_edge("CALLS", caller, "p.Other#sel(String)")
+
+
+def test_calls_binding_in_nested_anonymous_member_type_does_not_leak(tmp_path):
+    # Pathological inner-type position: a NAMED member type declared inside a
+    # field-initializer anonymous class. Its field `thing:Other` must NOT leak into
+    # the enclosing real class and shadow the real field `thing:Svc`.
+    ir = _extract_ir(tmp_path, {
+        "Svc.java": "package p;\npublic interface Svc { String sel(String a); }\n",
+        "Other.java": "package p;\npublic class Other { public String sel(String a) { return a; } }\n",
+        "Ctrl.java": (
+            "package p;\n"
+            "public class Ctrl {\n"
+            "  Svc thing;\n"
+            "  Object o = new Object() {\n"
+            "    class Member { Other thing; void go() { thing.sel(\"x\"); } }\n"
+            "  };\n"
+            "  String call(String a) { return thing.sel(a); }\n"
+            "}\n"
+        ),
+    })
+    caller = "p.Ctrl#call(String)"
+    assert ir.node(caller) is not None
+    assert ir.has_edge("CALLS", caller, "p.Svc#sel(String)")
+    assert not ir.has_edge("CALLS", caller, "p.Other#sel(String)")
+
+
+def test_calls_queries_are_per_language_and_valid():
+    # AC2: tags/locals queries live as separate per-language files the extractor
+    # loads at runtime, and compile against the Java grammar (multi-language-ready).
+    from tree_sitter import Language, Query
+    import tree_sitter_java as tsjava
+    from palimpsest.extract import java as jmod
+
+    qdir = Path(jmod.__file__).parent / "queries" / "java"
+    tags = qdir / "tags.scm"
+    locals_ = qdir / "locals.scm"
+    assert tags.is_file() and tags.read_text().strip()
+    assert locals_.is_file() and locals_.read_text().strip()
+    lang = Language(tsjava.language())
+    Query(lang, tags.read_text())  # must compile against the grammar
+    Query(lang, locals_.read_text())
+    # the extractor loads these very files, not an inlined copy
+    assert jmod._QUERY_DIR == qdir
+
+
 def test_provenance_attached_to_every_node_and_edge(ir):
     assert ir.nodes and ir.edges
     for n in ir.nodes:

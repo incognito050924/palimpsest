@@ -1,16 +1,18 @@
 """Static extraction of Java source into the palimpsest IR.
 
 Parser: tree-sitter-java (py-tree-sitter). Deterministic structural ontology only;
-CALLS is name-based best-effort (no full type resolution) and Lombok-generated
-members are invisible to a source parser — both acceptable for v1.
+CALLS is resolved by the receiver's static type (per-language tags/locals queries)
+with a name-based fallback when the receiver cannot be typed. Lombok-generated
+members are invisible to a source parser — acceptable for v1.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 
 import tree_sitter_java as tsjava
-from tree_sitter import Language, Parser, Node as TSNode
+from tree_sitter import Language, Parser, Query, QueryCursor, Node as TSNode
 
 from palimpsest.ir import IR, Node, Edge, Provenance
 from palimpsest.ir import REPO, PACKAGE, FILE, CLASS, METHOD
@@ -20,6 +22,14 @@ _TYPE_DECLS = ("class_declaration", "interface_declaration", "enum_declaration",
 _METHOD_DECLS = ("method_declaration", "constructor_declaration")
 
 _LANGUAGE = Language(tsjava.language())
+
+# Per-language tree-sitter queries own the build-less spine (ADR-20260706 §결정6):
+# `tags.scm` yields call references (with their receiver), `locals.scm` yields the
+# typed bindings a receiver identifier is resolved against. A new language plugs in
+# by adding its own queries/<lang>/*.scm; the resolver below stays language-agnostic.
+_QUERY_DIR = Path(__file__).parent / "queries" / "java"
+_TAGS_QUERY = Query(_LANGUAGE, (_QUERY_DIR / "tags.scm").read_text())
+_LOCALS_QUERY = Query(_LANGUAGE, (_QUERY_DIR / "locals.scm").read_text())
 
 
 def _parser() -> Parser:
@@ -51,6 +61,28 @@ def _simple_type_name(node: TSNode | None) -> str | None:
         return None
     # void_type / boolean_type / integral_type / floating_point_type / ...
     return None
+
+
+# Grammar nodes wrapping a type declaration's supertypes: class `extends`
+# (superclass), class `implements` (super_interfaces), interface `extends`
+# (extends_interfaces). Each holds either a bare type or a type_list of types.
+_SUPERTYPE_CONTAINERS = ("superclass", "super_interfaces", "extends_interfaces")
+
+
+def _supertype_names(type_decl: TSNode) -> set[str]:
+    """Simple names of the classes/interfaces ``type_decl`` extends or implements."""
+    out: set[str] = set()
+    for child in type_decl.named_children:
+        if child.type not in _SUPERTYPE_CONTAINERS:
+            continue
+        refs = child.named_children[0].named_children if (
+            child.named_children and child.named_children[0].type == "type_list"
+        ) else child.named_children
+        for ref in refs:
+            name = _simple_type_name(ref)
+            if name:
+                out.add(name)
+    return out
 
 
 def _param_types(method: TSNode) -> list[str]:
@@ -91,11 +123,11 @@ class _FileWalker:
         self.class_bodies: dict[str, TSNode] = {}
         # class fqn -> referenced simple type names (fields + params + imports)
         self.class_refs: dict[str, set[str]] = {}
+        # class fqn -> simple names of its direct supertypes (extends/implements)
+        self.class_supertypes: dict[str, set[str]] = {}
         # simple names of single-type imports in this file (attributed to its classes)
         self.import_simple: set[str] = set()
         self.file_classes: list[str] = []
-        # method fqn -> simple names invoked in its body (for name-based CALLS)
-        self.method_calls: dict[str, set[str]] = {}
 
     def _edge(self, kind: str, src: str, dst: str) -> None:
         self.edges.append(Edge(kind=kind, src=src, dst=dst, provenance=self.prov))
@@ -164,6 +196,7 @@ class _FileWalker:
         self._edge(CONTAINS, container_id, fqn)
         self.file_classes.append(fqn)
         self.class_refs.setdefault(fqn, set())
+        self.class_supertypes[fqn] = _supertype_names(node)
 
         body = node.child_by_field_name("body")
         if body is None:
@@ -203,21 +236,98 @@ class _FileWalker:
             )
         )
         self._edge(CONTAINS, class_fqn, fqn)
-        self.method_calls[fqn] = _collect_call_names(node)
 
 
-def _collect_call_names(method: TSNode) -> set[str]:
-    """Simple method names invoked anywhere in ``method``'s subtree."""
-    names: set[str] = set()
-    stack = [method]
-    while stack:
-        n = stack.pop()
-        if n.type == "method_invocation":
-            nm = n.child_by_field_name("name")
-            if nm is not None:
-                names.add(nm.text.decode())
-        stack.extend(n.children)
-    return names
+# A resolved call site: (rel_path, call_line, method_name, receiver_kind, receiver_value).
+# receiver_kind: "self" (unqualified / this), "name" (identifier receiver), "type"
+# (new T()), or "other" (field-access / chain — unresolved, falls back).
+CallSite = tuple[str, int, str, str, "str | None"]
+# A typed binding: (rel_path, def_line, var_name, simple_type_name).
+Binding = tuple[str, int, str, "str | None"]
+
+
+class FileScan:
+    """Call sites + typed bindings extracted from one file by the tags/locals queries."""
+
+    def __init__(self) -> None:
+        self.calls: list[CallSite] = []
+        # fields bind at their declaring class; locals/params only inside their method.
+        self.field_bindings: list[Binding] = []
+        self.local_bindings: list[Binding] = []
+
+
+_TYPE_BODY_NODES = ("class_body", "interface_body", "enum_body", "annotation_type_body")
+
+
+def _binding_is_modeled(name_node: TSNode) -> bool:
+    """True if the binding's enclosing type is one the walker turns into a node — a
+    named top-level or member type. False for an anonymous class body or a method-local
+    class anywhere in the enclosing chain, whose members the walker never sees; such
+    bindings must be dropped so a local (e.g. inside a ``new Runnable(){...}``) cannot be
+    attributed to the enclosing real method and shadow a field of the same name.
+
+    The whole type chain up to the file root must be modeled — every enclosing type a
+    direct member of the next — so a member type nested inside an anonymous/local class
+    (which is itself unmodeled) is rejected too.
+    """
+    body = name_node.parent
+    while body is not None and body.type not in _TYPE_BODY_NODES:
+        body = body.parent
+    if body is None:
+        return False
+    while body is not None:
+        owner = body.parent
+        if owner is None or owner.type == "object_creation_expression":
+            return False  # this type body is an anonymous class
+        a = owner.parent  # climb to the next enclosing type body
+        while a is not None and a.type not in _TYPE_BODY_NODES:
+            if a.type in ("method_declaration", "constructor_declaration"):
+                return False  # a method-local type — never a walker node
+            a = a.parent
+        body = a
+    return True
+
+
+def _classify_receiver(recv: TSNode | None) -> tuple[str, str | None]:
+    if recv is None or recv.type == "this":
+        return ("self", None)
+    if recv.type == "identifier":
+        return ("name", recv.text.decode())
+    if recv.type == "object_creation_expression":
+        return ("type", _simple_type_name(recv.child_by_field_name("type")))
+    return ("other", None)
+
+
+def _scan_calls_and_bindings(rel_path: str, root: TSNode) -> FileScan:
+    """Run the per-language tags/locals queries over one file's tree."""
+    scan = FileScan()
+    for _pat, caps in QueryCursor(_TAGS_QUERY).matches(root):
+        names = caps.get("reference.call.name")
+        if not names:  # a definition match, not a call reference
+            continue
+        call_node = caps["reference.call"][0]
+        recv = caps.get("reference.call.receiver")
+        kind, value = _classify_receiver(recv[0] if recv else None)
+        scan.calls.append((rel_path, call_node.start_point[0] + 1, names[0].text.decode(), kind, value))
+
+    for _pat, caps in QueryCursor(_LOCALS_QUERY).matches(root):
+        for prefix, out in (("field", scan.field_bindings), ("local", scan.local_bindings)):
+            d, t = caps.get(f"{prefix}.name"), caps.get(f"{prefix}.type")
+            if d and t and _binding_is_modeled(d[0]):
+                out.append((rel_path, d[0].start_point[0] + 1, d[0].text.decode(), _simple_type_name(t[0])))
+    return scan
+
+
+def _innermost(ranges: list[tuple[int, int, str]], line: int) -> str | None:
+    """FQN of the smallest [start, end] range containing ``line`` (innermost node)."""
+    best: str | None = None
+    best_span = -1
+    for start, end, fqn in ranges:
+        if start <= line <= end:
+            span = end - start
+            if best is None or span < best_span:
+                best, best_span = fqn, span
+    return best
 
 
 def _index_by_simple_name(nodes: list[Node], kind: str) -> dict[str, list[str]]:
@@ -245,22 +355,118 @@ def _depends_on_edges(
 
 
 def _calls_edges(
-    nodes: list[Node], method_calls: dict[str, set[str]], prov: Provenance
+    nodes: list[Node],
+    call_sites: list[CallSite],
+    field_bindings: list[Binding],
+    local_bindings: list[Binding],
+    class_supertypes: dict[str, set[str]],
+    prov: Provenance,
 ) -> list[Edge]:
-    # Index Method nodes by simple name. CALLS is name-based best-effort: a call
-    # to `foo(...)` links to every known method named `foo`. Self-loops (a name
-    # equal to the caller's own) are suppressed — with no type resolution they are
-    # the most likely false positive.
-    by_simple = _index_by_simple_name(nodes, METHOD)
+    """CALLS (Method->Method) resolved by the receiver's static type + hierarchy.
+
+    When a call's receiver resolves to a known type, the call links to that type's
+    method(s), to inherited methods on its supertypes, and to overriding methods on
+    its known subtypes/implementors (reachability for test-impact, ADR-20260706).
+    Unrelated same-named methods are excluded. Only when the receiver type cannot be
+    determined does resolution fall back to name-based matching (preserving the prior
+    recall). Self-loops are suppressed.
+    """
+    class_by_simple = _index_by_simple_name(nodes, CLASS)
+    methods_by_class_name: dict[tuple[str, str], list[str]] = {}
+    methods_by_name: dict[str, list[str]] = {}
+    method_ranges: dict[str, list[tuple[int, int, str]]] = defaultdict(list)
+    class_ranges: dict[str, list[tuple[int, int, str]]] = defaultdict(list)
+    for n in nodes:
+        if n.kind == METHOD:
+            cls = n.qualified_name.split("#", 1)[0]
+            methods_by_class_name.setdefault((cls, n.name), []).append(n.qualified_name)
+            methods_by_name.setdefault(n.name, []).append(n.qualified_name)
+            method_ranges[n.path].append((n.start_line, n.end_line, n.qualified_name))
+        elif n.kind == CLASS:
+            class_ranges[n.path].append((n.start_line, n.end_line, n.qualified_name))
+
+    # Type hierarchy (best-effort, resolved by simple name): direct super/sub edges.
+    direct_super: dict[str, set[str]] = {}
+    direct_sub: dict[str, set[str]] = defaultdict(set)
+    for cfqn, snames in class_supertypes.items():
+        supers = {s for sn in snames for s in class_by_simple.get(sn, ())}
+        direct_super[cfqn] = supers
+        for s in supers:
+            direct_sub[s].add(cfqn)
+
+    relatives_cache: dict[str, set[str]] = {}
+
+    def _relatives(cfqn: str) -> set[str]:
+        """``cfqn`` plus all transitive supertypes and subtypes in the corpus."""
+        cached = relatives_cache.get(cfqn)
+        if cached is not None:
+            return cached
+        out = {cfqn}
+        for adj in (direct_super, direct_sub):
+            stack = [cfqn]
+            while stack:
+                for nxt in adj.get(stack.pop(), ()):
+                    if nxt not in out:
+                        out.add(nxt)
+                        stack.append(nxt)
+        relatives_cache[cfqn] = out
+        return out
+
+    # Typed symbol tables: fields by declaring class, locals/params by their method.
+    # Bindings inside anonymous/local classes were already dropped at scan time
+    # (_binding_is_modeled), so a local can never be attributed to the enclosing method.
+    sym_field: dict[str, dict[str, str]] = defaultdict(dict)
+    for path, def_line, name, type_simple in field_bindings:
+        if type_simple:
+            cls = _innermost(class_ranges.get(path, []), def_line)
+            if cls is not None:
+                sym_field[cls][name] = type_simple
+    sym_method: dict[str, dict[str, str]] = defaultdict(dict)
+    for path, def_line, name, type_simple in local_bindings:
+        if type_simple:
+            owner = _innermost(method_ranges.get(path, []), def_line)
+            if owner is not None:
+                sym_method[owner][name] = type_simple
+
     seen: set[tuple[str, str]] = set()
     out: list[Edge] = []
-    for src_fqn, names in method_calls.items():
-        for name in names:
-            for dst_fqn in by_simple.get(name, ()):
-                if dst_fqn == src_fqn or (src_fqn, dst_fqn) in seen:
-                    continue
-                seen.add((src_fqn, dst_fqn))
-                out.append(Edge(kind=CALLS, src=src_fqn, dst=dst_fqn, provenance=prov))
+    for path, line, name, kind, value in call_sites:
+        src = _innermost(method_ranges.get(path, []), line)
+        if src is None:
+            continue
+        src_class = src.split("#", 1)[0]
+        seed: set[str] = set()
+        block_fallback = False  # a definitely-known receiver type never name-falls-back
+        if kind == "self":
+            # unqualified / this: enclosing class, but a static import may resolve
+            # elsewhere — allow name-based fallback if the hierarchy has no match.
+            seed = {src_class}
+        elif kind == "name":
+            typ = sym_method[src].get(value) or sym_field[src_class].get(value)
+            if typ:
+                seed = set(class_by_simple.get(typ, ()))
+                block_fallback = True
+            elif value in class_by_simple:  # static call on a corpus class: ClassName.m()
+                seed = set(class_by_simple[value])
+                block_fallback = True
+        elif kind == "type" and value:  # new T().m()
+            seed = set(class_by_simple.get(value, ()))
+            block_fallback = True
+
+        candidates: set[str] = set()
+        for c in seed:
+            candidates |= _relatives(c)
+        dsts: list[str] = []
+        for tc in sorted(candidates):  # sorted -> deterministic edge order
+            dsts.extend(methods_by_class_name.get((tc, name), ()))
+        if not dsts and not block_fallback:
+            dsts = list(methods_by_name.get(name, ()))
+
+        for dst in dsts:
+            if dst == src or (src, dst) in seen:
+                continue
+            seen.add((src, dst))
+            out.append(Edge(kind=CALLS, src=src, dst=dst, provenance=prov))
     return out
 
 
@@ -284,7 +490,10 @@ def extract(root: Path | str, provenance: Provenance, repo_name: str | None = No
     edges: list[Edge] = []
     packages: set[str] = set()
     class_refs: dict[str, set[str]] = {}
-    method_calls: dict[str, set[str]] = {}
+    class_supertypes: dict[str, set[str]] = {}
+    call_sites: list[CallSite] = []
+    field_bindings: list[Binding] = []
+    local_bindings: list[Binding] = []
 
     for path in _iter_java_files(root):
         source = path.read_bytes()
@@ -298,13 +507,19 @@ def extract(root: Path | str, provenance: Provenance, repo_name: str | None = No
             packages.add(walker.pkg)
         for fqn, refs in walker.class_refs.items():
             class_refs.setdefault(fqn, set()).update(refs)
-        method_calls.update(walker.method_calls)
+        class_supertypes.update(walker.class_supertypes)
+        scan = _scan_calls_and_bindings(rel, tree.root_node)
+        call_sites.extend(scan.calls)
+        field_bindings.extend(scan.field_bindings)
+        local_bindings.extend(scan.local_bindings)
 
     # DEPENDS_ON (Class->Class): resolve referenced simple type names against
     # known classes by unqualified name (best-effort, no full type resolution).
     edges.extend(_depends_on_edges(nodes, class_refs, provenance))
-    # CALLS (Method->Method): name-based best-effort resolution.
-    edges.extend(_calls_edges(nodes, method_calls, provenance))
+    # CALLS (Method->Method): resolved by the receiver's static type + hierarchy.
+    edges.extend(
+        _calls_edges(nodes, call_sites, field_bindings, local_bindings, class_supertypes, provenance)
+    )
 
     # Repo node + Package nodes + Repo->Package CONTAINS
     repo = Node(kind=REPO, qualified_name=repo_name, name=repo_name, provenance=provenance)
