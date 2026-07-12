@@ -76,7 +76,7 @@ palimpsest는 정초 VISION에서 **생성형 큐레이터**(단순 아카이비
 
 - **구현**: 본 work item은 설계+계획만이다(소스 변경 0). `palimpsest.curate` 모듈·CLI·로더 배선의 실제 구현은 백로그의 후속 work item이 담당한다.
 - **VG1 — ADR 전수성**: 10개 중 5개 ADR만 정독했다(backfill · community-deterministic · communityreport · decision-lineage · branch-scoped 미정독). "생성을 영구 금지한 ADR 부재"는 전수 grep이 아닌 판단이며, verify 노드/후속이 전수 확인해야 한다.
-- **VG2 — rebuild-determinism 실행 검증**: "생성 출력을 git-persist + MERGE 멱등하면 drop→reload가 실제로 동일 재현한다"는 설계 주장이며 실행으로 확인되지 않았다. 후속이 drop→reload 재현 테스트로 확정해야 한다.
+- **VG2 — rebuild-determinism 실행 검증 (확인됨 2026-07-13)**: "생성 출력을 git-persist + MERGE 멱등하면 drop→reload가 실제로 동일 재현한다"는 주장이 **실행으로 확인됐다**. 근거(testcontainers Neo4j 5, green): `tests/kg/test_curate_integration.py::test_curate_rebuild_is_deterministic`(drop→같은 git-SoT 재적재→노드·엣지·id·edge_kind·grounding 동일) + `tests/e2e/test_cli_e2e.py`의 drop-and-reload 2건(semantic_verdict·embedding/vector-index) + summary/risk `test_reload_is_idempotent`. 초기 설계 주장의 미검증 상태 해소. (재개 트리거는 아래 change_condition (VG2) 유지.)
 - **임베딩 in-process화**: 범위 밖. 외부 single-model 유지.
 - **판정(content-verdict) in-process화**: 명시 금지. 외부 유지.
 - **CodeQL 세부 edge_kind 표기 규칙**: CodeQL 슬라이스에서 확정(design-notes 개방 질문).
