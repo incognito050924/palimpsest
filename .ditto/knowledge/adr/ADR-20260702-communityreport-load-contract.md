@@ -58,7 +58,7 @@ CommunityReport 적재 계약을 다음으로 결정한다. 별도 규약을 신
 - **외부 생산자 파이프라인** — community별 report prose 생성(LLM). palimpsest 밖(provider-free).
 - **`recall_community`와의 통합 — 실현**(wi_260702dbu): 멤버 반환 시 그 멤버들에 결박된 Summary(그 community의 CommunityReport 포함)를 'summaries' 채널로 곁들인다(main recall과 동일 역방향 조회, items 누출 없음). 테스트 `tests/recall/test_recall_community_report.py::test_community_report_surfaces_via_recall_community`.
 - **report-수준 속성**(community-wide risk score 등) — Summary 스키마에 없는 필드. 필요 시 라벨/엣지 재검토(현재는 Summary 재사용).
-- **provider-free 완화 여부** — 이 ADR 범위 밖(별도 결정, `ADR-20260701`과 동일 입장: 현재 hard invariant 유지).
+- **provider-free 완화 여부** — 이 ADR 범위 밖(별도 결정). ~~`ADR-20260701`과 동일 입장: 현재 hard invariant 유지.~~ → **갱신**(2026-07-06, `ADR-20260706-generative-curator-direction`): ADR-20260701 §결정1의 provider-free가 전역→경로-스코프로 정련됐다(격리 opt-in git-물질화 생산자 허용, recall+load 경로는 계속 LLM-free). CommunityReport prose 생산자도 동일 패턴(격리 생산자 → git-SoT 물질화 → 기존 멤버십-grounding 로더)을 따르면 되고, 본 로더 계약(멤버십-grounding·Summary 재사용)은 생성자 중립이라 무변경.
 
 ## 철회·변경 조건 (change_condition)
 

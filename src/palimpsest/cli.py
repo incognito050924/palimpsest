@@ -47,7 +47,7 @@ from palimpsest.backfill import backfill
 from palimpsest.extract import extract, read_provenance
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
-from palimpsest.kg.summary import create_vector_index
+from palimpsest.kg.summary import create_vector_index, summary_id
 from palimpsest.recall import recall, recall_churn, recall_cochange
 from palimpsest.recall.graphrag import reconcile_recall
 from palimpsest.reconcile import capture
@@ -224,6 +224,40 @@ def _cmd_load(args) -> None:
     _print_load_result(args.payload, result)
 
 
+def _cmd_curate(args) -> None:
+    # The isolated generative producer is imported LAZILY here (never at cli
+    # module load) so `import palimpsest.cli` stays outside curate's import
+    # closure — the path-scoped provider-free probes keep passing. The CLI, not
+    # the producer, owns materialisation: it derives the deterministic id (shared
+    # with the loader) and freezes the payload to git-SoT. Loading stays with the
+    # existing `load` subcommand.
+    from palimpsest.curate import CurateRequest, default_generate, produce
+
+    request = CurateRequest(
+        target_id=args.target,
+        grounding_ids=tuple(args.ground),
+        facts=args.facts,
+        source_commit=args.source_commit,
+        created_at=args.created_at,
+        generator=args.generator,
+        model=args.model,
+    )
+    # The model the payload records for provenance is the model actually invoked.
+    payload = produce(
+        request, generate=lambda prompt: default_generate(prompt, model=request.model)
+    )
+
+    sid = summary_id(request.target_id, request.generator, request.model, request.source_commit)
+    outdir = Path(args.out)
+    outdir.mkdir(parents=True, exist_ok=True)
+    # The loader reads a directory of JSON ARRAYS (cli._read_payload_file), so the
+    # materialised file is a one-element array. The ``summary:`` prefix is dropped
+    # for a filesystem-safe name; the id itself is unchanged in the graph.
+    path = outdir / f"{sid.split(':', 1)[1]}.json"
+    path.write_text(json.dumps([payload], ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"CURATED {path} (target={request.target_id}, model={request.model})")
+
+
 def _print_load_result(path, result) -> None:
     print(f"LOADED {result.loaded}/{result.intended} summaries from {path}")
     print(f"REJECTED ({result.rejected})")
@@ -336,6 +370,25 @@ def build_parser() -> argparse.ArgumentParser:
         "files — the git-tracked source-of-truth to rebuild Neo4j from",
     )
     p_load.set_defaults(func=_cmd_load)
+
+    p_cur = sub.add_parser(
+        "curate",
+        help="generate a grounded summary payload (grounding+gap+confidence) with "
+        "the isolated generative producer and MATERIALISE it to git-SoT "
+        "(loading is left to `load` — this is opt-in, LLM-using, provider-gated)",
+    )
+    p_cur.add_argument("--target", required=True, help="node id being summarised (SUMMARIZES anchor)")
+    p_cur.add_argument(
+        "--ground", action="append", required=True, metavar="ID",
+        help="a real node id a claim may ground in; repeat for the candidate set",
+    )
+    p_cur.add_argument("--facts", required=True, help="the code/KB facts the model summarises")
+    p_cur.add_argument("--generator", required=True, help="the producing tool/agent (not palimpsest)")
+    p_cur.add_argument("--model", required=True, help="the actual generation model (not palimpsest)")
+    p_cur.add_argument("--source-commit", required=True, dest="source_commit", help="code commit summarised against")
+    p_cur.add_argument("--created-at", required=True, dest="created_at", help="external generation time (ISO-8601)")
+    p_cur.add_argument("--out", required=True, help="git-tracked summaries directory to materialise into")
+    p_cur.set_defaults(func=_cmd_curate)
 
     p_rec = sub.add_parser(
         "reconcile",

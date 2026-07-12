@@ -23,6 +23,11 @@ dependencies = [
 # testcontainers[neo4j] stands up a hermetic Neo4j 5 Community container per
 # test session (auto lifecycle); KG ingest tests run against that live bolt.
 test = ["pytest>=8", "testcontainers[neo4j]>=4", "neo4j>=5.14"]
+# The isolated generative curator (palimpsest.curate, ADR-20260706). The ONLY
+# region that calls an LLM — kept OUT of the base install and the `test` group so
+# the default pipeline (backfill/reconcile) and CI stay provider-free. Imported
+# lazily, so `import palimpsest.curate` never pulls it in.
+curate = ["anthropic>=0.40"]
 
 [build-system]
 requires = ["hatchling"]

@@ -53,5 +53,5 @@ backfill(ADR-20260702-backfill-history-capture)은 **한 줄**의 이력을 bare
 ## 철회·변경 조건 (change_condition)
 
 - **branch 너머 per-commit 버전드가 필요해지면**: 브랜치 ref를 branch-scoping 이상으로(커밋별) 버전드해야 하는 질의가 나오면 별도 ADR로 결정한다.
-- **provider-free 완화 시**: reconcile이 판정을 *생성*해야 한다면(외부 표시가 아니라) 이 ADR과 ADR-20260701 provider-free 불변식을 함께 재론한다.
+- **provider-free 완화 시**: reconcile이 판정을 *생성*해야 한다면(외부 표시가 아니라) 이 ADR과 ADR-20260701 provider-free 불변식을 함께 재론한다. → **부분 이행**(2026-07-06, `ADR-20260706-generative-curator-direction`): ADR-20260701 §결정1의 provider-free 불변식이 경로-스코프로 정련됐다(격리 opt-in 생산자 허용, recall+load 경로는 계속 LLM-free). 다만 이 ADR이 결박한 조건은 **reconcile의 판정 *생성***이고, 그 축은 여전히 미완화(reconcile은 여기서 판정을 생성하지 않고 외부 표시만 한다) — 필요 시 함께 재론.
 - **unspecified 평면 처리**: bare 평면을 named 평면과 통합해야 하는 요구가 실사용에서 나오면 마이그레이션 전략을 별도로 결정한다.

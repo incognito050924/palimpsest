@@ -5,6 +5,7 @@
 - 날짜: 2026-07-01
 - work item: wi_260701cjf (slice 4 — 의미층 첫 적재 계약)
 - 관계: `ADR-20260626-foundational-architecture`가 품은 "GraphRAG LLM 합성(근거결박)"의 첫 실현. `ADR-20260701-v1-ontology-recall-reframe` §결정3이 유예(deferred, not forbidden)한 생성형·semantic 요약·inferred 엣지 층의 **적재 계약을 실현**한다 — 그 ADR을 supersede하지 않는다(계속 active, 본 ADR이 후속을 구체화). 같은 ADR의 edge_kind 노트(line 25)가 "향후 inferred writer는 deterministic/inferred 분리를 규약으로 지켜야 한다"며 이 층을 선인가했다.
+  - `ADR-20260706-generative-curator-direction` §결정3이 본 ADR §결정1의 provider-free 불변식을 **전역 해석에서 경로-스코프 해석으로 정련(narrowing·부분 supersede)**한다. 본 ADR은 계속 active이며, §결정1 본문에 정련 노트를 남긴다(아래). 임베딩(`ADR-20260704-semantic-embedding-load-contract`)·no-laundering(`ADR-20260702-risk-designdecision-load-contract`) 무저촉.
 
 ## 맥락
 
@@ -14,7 +15,9 @@ v1(ADR-20260701-v1-ontology-recall-reframe)은 결정론 구조층(코드→KG)�
 
 palimpsest 의미층 적재 계약을 다음으로 결정한다.
 
-1. **palimpsest는 provider-free (LLM 호출 0).** 요약 **생성은 전적으로 외부 에이전트**의 책임이다. palimpsest 코드에 provider를 박지 않아 테스트가 hermetic(키·네트워크 없이 재현)하다.
+1. **palimpsest의 recall+load 경로는 LLM-free (경로-스코프 probe로 강제, green 유지).** 요약 **생성**은 격리된 opt-in git-물질화 생산자(신설 `palimpsest.curate` — recall/load import 폐포 밖) **또는** 외부 에이전트가 담당하며, 어느 쪽이든 payload를 git-SoT로 먼저 물질화한 뒤 기존 멱등 로더를 통과한다. **content-verdict(판정 참/거짓)는 외부 유지**(생성자≠검증자). recall/load 경로에 provider를 박지 않으므로 테스트가 hermetic(키·네트워크 없이 재현)하다.
+
+   > **정련(2026-07-06, `ADR-20260706-generative-curator-direction` §결정3; 구현 착지 wi_260712t3e).** 원래 이 결정은 "palimpsest는 provider-free(어디서도 LLM 0), 생성은 전적 외부"였다. ADR-20260706이 이를 **전역 해석에서 경로-스코프 해석으로 좁혔다(narrowing·부분 supersede)**: 금지되는 것은 recall+load 경로의 LLM(경로-스코프 probe가 강제)이지 배포물 전체가 아니다. 격리 opt-in 생산자(`palimpsest.curate` + 별도 CLI 서브커맨드)는 그 import 폐포 밖에 있어 probe를 깨지 않는다 — 코드로 확인: `import palimpsest.curate`의 폐포에 `palimpsest.recall`/load가 0(역방향 격리 테스트), 그리고 curate 설치 하에서도 5개 경로-스코프 probe green + 위반 주입 시 red(음성 케이스). **무저촉 명시**: 임베딩 single-model·차원 pin(`ADR-20260704-semantic-embedding-load-contract`)과 no-laundering(deterministic⊎inferred==total ∧ NULL==0, `ADR-20260702-risk-designdecision-load-contract`)은 생성자 중립이라 이 정련의 영향을 받지 않는다.
 2. **적재 시 3중 형식 강제.**
    - **근거결박(grounding)**: 요약의 모든 claim이 ≥1 source ref를 갖고, 그 ref가 실재 그래프 노드/코드로 resolve돼야 한다. 미해소 시 **summary-atomic 거부** — 실패한 요약만 거부하고 나머지는 적재한다.
    - **edge_kind='inferred' 분리**: 결정론 writer를 verbatim 재사용하지 않는다. Summary→코드 엣지(SUMMARIZES)는 `edge_kind='inferred'`로 마킹(deterministic⊎inferred==total ∧ NULL==0을 writer+테스트로 강제).
