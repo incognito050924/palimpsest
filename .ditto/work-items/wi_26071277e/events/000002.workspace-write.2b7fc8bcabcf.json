@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_26071277e",
+  "seq": 2,
+  "actor": "workspace-write",
+  "event_id": "2b7fc8bcabcf3391a307f16472fcc16b0c8e395cb3e0c94293cb5ff1bea616c8",
+  "ts": "2026-07-12T06:29:15.511Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-2",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "bash -c grep -qE '정체성 불변식 \\(최상위' docs/VISION.md && grep -qE 'A. 환경 비종속' docs/VISION.md && grep -qE 'B. 생성형 큐레이터' docs/VISION.md && echo AC2_OK",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

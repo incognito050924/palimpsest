@@ -29,6 +29,8 @@ agreed terms, and learnings over time.
 - **ADR-20260701-v1-ontology-recall-reframe** (active) — v1 첫 슬라이스 재프레임: 설계위험 감지 → KG 온톨로지 구축 + GraphRAG 근거결박 회상. v1은 결정론 구조층만, 생성형·inferred는 유예. → `adr/ADR-20260701-v1-ontology-recall-reframe.md`
 - **ADR-20260701-semantic-layer-load-contract** (active) — palimpsest 의미층 적재 계약: provider-free(LLM 호출 0), 외부 요약을 근거결박·edge_kind='inferred' 분리·provenance 강제로 적재, 회상은 'summaries' 분리 채널. → `adr/ADR-20260701-semantic-layer-load-contract.md`
 - **ADR-20260703-branch-scoped-node-identity** (active) — 브랜치 스코프 노드 정체성: id에 branch 차원을 접어(scope_to_branch, None=bare byte-identical) 같은 심볼의 브랜치 버전이 붕괴 없이 공존. backfill의 '커밋별 버전드 안 만듦'을 branch 축에 한해 supersede, provider-free 유지. → `adr/ADR-20260703-branch-scoped-node-identity.md`
+- **ADR-20260706-generative-curator-direction** (active) — 생성형 큐레이터 방향 회복: 격리 opt-in in-process 생산자 + git 선(先)물질화 → 기존 멱등 inferred 로더. provider-free를 전역→경로-스코프로 정련(recall+load 경로만 LLM-free), content-verdict는 외부 유지. 정밀 콜그래프는 주 build-less tree-sitter spine + 옵션 보조 CodeQL(도입 아님, 보안-Risk 니치 유예). → `adr/ADR-20260706-generative-curator-direction.md`
+- **ADR-20260712-palimpsest-identity-host-neutral-generative-curator** (active) — palimpsest 정체성 불변식(최상위): ① 환경 비종속(소비자-일반 표면·소비자 개념 비내부화·역방향 종속 금지; ditto는 주·첫 소비자일 뿐) ② 생성형 큐레이터=핵심 목적. ADR-20260626/20260706을 supersede 않고 authority로 승격 + always-loaded 투영으로 드리프트 방지. → `adr/ADR-20260712-palimpsest-identity-host-neutral-generative-curator.md`
 
 ## v1 초점
 

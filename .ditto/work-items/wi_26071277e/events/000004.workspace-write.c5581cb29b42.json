@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_26071277e",
+  "seq": 4,
+  "actor": "workspace-write",
+  "event_id": "c5581cb29b421af067fd867f75f2b4feb641bfc1746f01fd3b92983732cbf4dc",
+  "ts": "2026-07-12T06:29:15.783Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-4",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "bash -c ditto bridge knowledge --check >/dev/null && grep -qE 'ADR-20260712-palimpsest-identity' CLAUDE.md && grep -qE 'ADR-20260706-generative-curator-direction' CLAUDE.md && echo AC4_OK",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_26071277e",
+  "seq": 1,
+  "actor": "workspace-write",
+  "event_id": "3177ed271ab1cb1c9276b57f97ceb846153e0e4b38b46bafd5645ee3c1f1d88d",
+  "ts": "2026-07-12T06:29:15.409Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-1",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "bash -c ditto knowledge adr-check && grep -qE '결정 1 — 환경 비종속' .ditto/knowledge/adr/ADR-20260712-palimpsest-identity-host-neutral-generative-curator.md && grep -qE '결정 2 — 생성형 큐레이터' .ditto/knowledge/adr/ADR-20260712-palimpsest-identity-host-neutral-generative-curator.md && grep -qE '철회·변경 조건' .ditto/knowledge/adr/ADR-20260712-palimpsest-identity-host-neutral-generative-curator.md && echo AC1_OK",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

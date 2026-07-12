@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_26071277e",
+  "seq": 3,
+  "actor": "workspace-write",
+  "event_id": "d929b3895e44deb8967778878c8fe4042f0542a9e97dc6597ec9d4d42c1e1d33",
+  "ts": "2026-07-12T06:29:15.612Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-3",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "bash -c grep -qE 'ADR-20260712-palimpsest-identity' .ditto/knowledge/CONTEXT.md && grep -qE 'ADR-20260706-generative-curator-direction' .ditto/knowledge/CONTEXT.md && echo AC3_OK",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

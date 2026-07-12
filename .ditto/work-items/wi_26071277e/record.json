@@ -1,0 +1,73 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_26071277e",
+  "title": "palimpsest 정체성 사상(환경 비종속 + 생성형 큐레이션)을 최상위로 못박아 드리프트 방지",
+  "source_request": "이 근본적인 사상(환경 비종속 + 큐레이션이 핵심 목적, ditto는 주 소비자지만 종속 금지)이 이미 palimpsest에 최상위 목표로 잡혀있는지 확인하고 흔들리지 않도록 해",
+  "goal": "palimpsest 정체성 사상(환경 비종속 + 생성형 큐레이션)을 최상위로 못박아 드리프트 방지",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "새 정체성 ADR 파일이 .ditto/knowledge/adr/에 존재하고 ditto knowledge adr-check가 clean이며, 그 본문에 '환경 비종속'(소비자-일반 표면/개념 비내부화/역방향 종속 금지)과 '생성형 큐레이터=핵심 목적' 두 결정, change_condition 섹션이 grep으로 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "bash -c ditto knowledge adr-check && grep -qE '결정 1 — 환경 비종속' .ditto/knowledge/adr/ADR-20260712-palimpsest-identity-host-neutral-generative-curator.md && grep -qE '결정 2 — 생성형 큐레이터' .ditto/knowledge/adr/ADR-20260712-palimpsest-identity-host-neutral-generative-curator.md && grep -qE '철회·변경 조건' .ditto/knowledge/adr/ADR-20260712-palimpsest-identity-host-neutral-generative-curator.md && echo AC1_OK",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "VISION.md에 환경 비종속과 생성형 큐레이터가 최상위 목표 문구로 grep 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "bash -c grep -qE '정체성 불변식 \\(최상위' docs/VISION.md && grep -qE 'A. 환경 비종속' docs/VISION.md && grep -qE 'B. 생성형 큐레이터' docs/VISION.md && echo AC2_OK",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "CONTEXT.md 결정 headline 섹션에 새 ADR id와 ADR-20260706 문자열이 grep 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "bash -c grep -qE 'ADR-20260712-palimpsest-identity' .ditto/knowledge/CONTEXT.md && grep -qE 'ADR-20260706-generative-curator-direction' .ditto/knowledge/CONTEXT.md && echo AC3_OK",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-4",
+      "statement": "ditto bridge knowledge 재투영 후 CLAUDE.md의 projected 블록에 새 ADR id와 ADR-20260706-generative-curator-direction가 grep 확인되고 ditto bridge knowledge --check가 clean이다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "bash -c ditto bridge knowledge --check >/dev/null && grep -qE 'ADR-20260712-palimpsest-identity' CLAUDE.md && grep -qE 'ADR-20260706-generative-curator-direction' CLAUDE.md && echo AC4_OK",
+          "summary": "exit 0"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [],
+  "worktrees": [],
+  "follow_ups": [
+    {
+      "kind": "idea",
+      "note": "코드베이스 품질 이해·정규화 패턴·지속 가꾸기(pre-compute substrate) — design-notes 주제 F seed. 범위(F-Q1/2/4) 정해지면 ADR 승격. issue #9/T9 spine과 함께 발전."
+    }
+  ],
+  "risks": [],
+  "runs": [],
+  "created_at": "2026-07-12T06:19:29.195Z",
+  "updated_at": "2026-07-12T06:30:41.622Z",
+  "closed_at": "2026-07-12T06:30:41.622Z"
+}
