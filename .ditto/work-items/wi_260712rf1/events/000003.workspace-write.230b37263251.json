@@ -1,0 +1,13 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260712rf1",
+  "seq": 3,
+  "actor": "workspace-write",
+  "event_id": "230b37263251a9d953dfec6cd4975c9e7c835254ef0a8a6b76de7b4029123c22",
+  "ts": "2026-07-12T15:56:52.915Z",
+  "kind": "claim_release",
+  "payload": {
+    "claimed_branch": "feat/issue-4-codeql-head-risk",
+    "posted_claim_marker": "claim:feat/issue-4-codeql-head-risk"
+  }
+}

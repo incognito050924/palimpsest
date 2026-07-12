@@ -1,0 +1,70 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_260712rf1",
+  "title": "[P2] CodeQL HEAD-only 보조 (옵션·유예) — security/taint Risk 니치",
+  "source_request": "[P2] CodeQL HEAD-only 보조 (옵션·유예) — security/taint Risk 니치\n\n> **우선순위: P2 (옵션·유예).** = 재검토 백로그 T10. **지금 드롭 가능.**\n> **권위**: `ADR-20260706-generative-curator-direction.md` §결정6(보조 옵션 CodeQL, 니치=security-Risk) · design-notes 주제 C §5.\n\n## 목표\n\n빌드 가능한 HEAD에서 CodeQL로 **security/taint Risk** 산출 — build-less가 대체 못 하는 **유일 니치(interprocedural taint)**. + 선택적 정밀 부스트(virtual dispatch, dataflow). 결정론적 security-Risk 생산자가 **실제 필요해질 때** 채택; 지금은 유예.\n\n## 범위 (착수 시 확정)\n\n- 신설 CodeQL 생산자(curate와 **동형** 격리 + optional-dep). CodeQL을 빌드 가능한 HEAD에서만 실행 → findings를 git-SoT에 물질화 → 기존 로더로 적재.\n- `extracted_by:'codeql'` provenance 마커 + coverage-asymmetry(HEAD-only) 정직 표기.\n- **이력 spine은 P1(tree-sitter) 유지** — CodeQL을 이력 엔진으로 쓰지 않음.\n\n## 착수 전 확정 필요 (open — design-notes 주제 C)\n\n- **C-Q5**: CodeQL 유래 결정론적 Risk를 기존 inferred Risk와 어떻게 구분?(edge_kind/provenance/서브타입) — no-laundering 정합 필수.\n- **C-Q1**: 이력 spine 추출기.\n- **C-Q2**: palimpsest 직접 실행 vs DITTO 산출 소비.\n\n## Acceptance Criteria (착수 시 red-first로 구체화)\n\n- HEAD findings(특히 security/taint Risk)가 git-물질화 후 로더 통과 + provenance 마커 적재.\n- coverage-asymmetry 정직성: 회상이 \"CodeQL 엣지=HEAD-only, tree-sitter 엣지=전이력\" 구분 표기.\n- 이력 backfill 균일성(tree-sitter spine)이 CodeQL 추가로 안 깨짐(기존 backfill 테스트 green).\n\n## 의존\n\n없음(별도 보조 트랙). **spine(P1)의 의존 아님** — spine 없이도 정밀 주경로는 성립. curate 패턴(P0) 착지가 참조 구현이 되면 재사용 가능하나 필수 아님.",
+  "goal": "CodeQL HEAD-only 보조의 실현가능성 스파이크 — 격리 opt-in CodeQL 생산자가 Java taint fixture에서 security finding을 산출→git-SoT 선물질화→기존 멱등 Risk 로더가 edge_kind=inferred + extracted_by=codeql provenance로 grounded 적재. curate 동형 격리·host-neutral·no-laundering 정합을 적재 계약까지 증명. main 미병합·ADR-20260706 §41 유예 유지(재유예).",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "격리 CodeQL 생산자 모듈이 recall/kg/load import 폐포 밖에 있고(격리 probe green), codeql subprocess 호출까지 포함하도록 격리 정의가 확장돼 검증된다",
+      "verdict": "unverified",
+      "evidence": []
+    },
+    {
+      "id": "ac-2",
+      "statement": "생산자가 taint fixture에서 security finding을 산출해 git-SoT JSON으로 선물질화하며, 재실행 시 결정적 id로 byte-identical(멱등)",
+      "verdict": "unverified",
+      "evidence": []
+    },
+    {
+      "id": "ac-3",
+      "statement": "기존 Risk 로더가 findings를 edge_kind=inferred + extracted_by=codeql provenance로 grounded 적재(flags 미해결 시 entity-atomic 거부)하고, no-laundering 파티션 불변식 deterministic⊎inferred==total 이 green",
+      "verdict": "unverified",
+      "evidence": []
+    },
+    {
+      "id": "ac-4",
+      "statement": "hermetic — 물질화 findings fixture 기반 테스트가 codeql 바이너리·빌드·네트워크 없이 통과하고, 실 CodeQL 실행은 opt-in 마커/수동 경로로 분리된다",
+      "verdict": "unverified",
+      "evidence": []
+    },
+    {
+      "id": "ac-5",
+      "statement": "이슈 #4에 스파이크 결과+재유예 근거가 기록되고 main에 병합되지 않는다(feature 브랜치 유지)",
+      "verdict": "unverified",
+      "evidence": []
+    }
+  ],
+  "status": "partial",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [],
+  "worktrees": [],
+  "declared_risk": {
+    "non_local": true,
+    "unaudited": true
+  },
+  "github_issue": {
+    "repo": "incognito050924/palimpsest",
+    "number": 4
+  },
+  "risks": [],
+  "re_entry": {
+    "fresh_evidence_needed": [
+      "un-defer 트리거(ADR-20260706 §41 change_condition (a)/(c))",
+      "C-Q5=Risk subtype/edge discriminator 확정",
+      "SARIF 비결정성 정규화",
+      "실패 vs clean-0 구별+원자쓰기",
+      "caller-side SARIF→branch-scoped node-id resolver + IR 왕복 필드",
+      "다중흐름/위치정밀도/비트랜잭션_write/created_at 게이트"
+    ]
+  },
+  "runs": [],
+  "started_at_sha": "f3665517bdf58dcaa52325675988fe1dad53c366",
+  "started_untracked_baseline": [
+    ".ditto/work-items/wi_260712rf1/"
+  ],
+  "created_at": "2026-07-12T14:04:41.001Z",
+  "updated_at": "2026-07-12T15:57:03.992Z"
+}
