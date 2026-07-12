@@ -1,5 +1,8 @@
 # palimpsest 생성형 큐레이터 재검토 — 실행 백로그
 
+> **등록됨 (2026-07-12)**: 이 백로그는 GitHub 이슈 + work item으로 병합·우선순위 등록됐다.
+> **P0** = T1·T2·T3·T4·T6·T7·T8 병합 → 이슈 `#3` + work item `wi_260712t3e`(9 AC, draft·미착수) · **P1** = T9-PRIMARY → 이슈 `#2` · **P2(옵션·유예)** = T10 → 이슈 `#4`. 설계-블록(A/B/D/E) = 이슈 `#5/#6/#7/#8`, 코드품질 substrate(F) = `#1`. 우선순위는 보드 Priority 필드(P0/P1/P2)가 SoT, 현행 상태는 이슈가 권위.
+
 - work item: `wi_260705lxy` (reexam) — **이 WI는 설계+계획에서 멈춘다. 소스 변경 0.**
 - 이 백로그는 **후속 구현 WI**가 집어갈 작업 목록이다. 여기의 어떤 항목도 이 WI에서 착수하지 않는다.
 - 출처(권위): 확정 설계 `docs/design/palimpsest-generative-curator-reexamination.md`(§5 모듈 경계 · §6 충돌 해소 · §9 검증 공백)와 결정 `.ditto/knowledge/adr/ADR-20260706-generative-curator-direction.md`(§결정 1–7 · change_condition).

@@ -12,6 +12,7 @@
 - **[C] 구조 추출 정밀도** — source-only AST(현재) vs semantic 분석(CodeQL)·외부 producer 소비 (상태: 탐색 · **방향 선호: 외부 정적도구 적극 도입 + CodeQL 이중 producer**)
 - **[D] 테스트 코드 모델링 & 테스트 임팩트** — 테스트/프로덕션 구분 + test→target 관계 + 변경→영향 테스트 회상 (상태: 탐색)
 - **[E] 브랜치 모델링** — branch를 property(현재)로 vs Branch 노드로 reify (진입점·계보). 성능은 인덱스로 (상태: 탐색)
+- **[F] 코드베이스 품질 이해·정규화 substrate** — 코드 품질을 이해·정규화 패턴 제공, 구조를 지속 가꾸기(pre-compute 질의가능 팩트층). ditto#9의 palimpsest측 동기 (상태: 탐색 · seed)
 
 > 새 주제는 여기에 한 줄 추가하고 아래에 `## [X] 제목` 섹션을 붙인다.
 
@@ -320,6 +321,57 @@ Summary 품질엔 세 축이 있고 서로 다르다. 헷갈리지 않게 정리
 - **E-Q3**: branch 계보(BRANCHED_FROM/MERGED_INTO)를 실제로 회상/질의에 쓸 유스케이스가 있나? (없으면 만들지 않는다, §4-3)
 - **E-Q4**: Branch 노드가 정체성 차원(id의 branch)과 이중화되지 않게, "메타/계보 앵커"로만 한정하는 계약을 어떻게 강제?
 
+# [F] 코드베이스 품질 이해·정규화 substrate — pre-compute 질의가능 팩트층
+
+## 0. 동기 (사용자 제기 2026-07-12 · GitHub issue #1)
+
+palimpsest(그리고 palimpsest를 소비하는 AI 에이전트)가 코드베이스를 **잘 이해**하려면 그 전제가 **코드베이스 품질 = 이해하기 쉬운 구조**다. 그래서 palimpsest에 역할이 하나 더 붙는다: 코드베이스의 특성을 이해하고 **정규화된 패턴을 제공**해 구조를 **지속적으로 가꿔나가게** 돕는 것.
+
+이건 `incognito050924/ditto#9`("ACG 개선 — Meta의 pre-compute")의 **palimpsest측 진짜 동기**다. ditto#9가 Meta 기법 중 pre-compute(Glean식 정규화·질의가능 코드-팩트 색인)를 든 이유가 성능 최적화가 아니라 **정규화된 코드베이스 이해 substrate**라는 것. (이 관계는 이슈 #1 기준; ditto#9 원문은 외부 repo라 미검증.)
+
+> 이슈 #1은 seed다: **아직 결정 아님.** 여기서도 동기·관계·열린 질문만 쌓고 조기 잠금하지 않는다. 범위(F-Q4/F-Q1/F-Q2)가 정해지면 그 부분만 ADR로 승격.
+
+## 1. 사실 (코드·ADR 확인)
+
+- **"질의가능 색인"의 현행 실현 = KG(Neo4j projection)**. git=SoT에서 결정론적으로 재구축되는 그래프가 이미 "재파싱 대신 질의"를 부분 실현(주제 C §1, `docs/research/precompute-hugrag-kg.md`). → Glean식 pre-compute의 *패턴*은 골격이 이미 있다.
+- **그러나 정밀 substrate는 아직 미완**: 구조 팩트를 뽑는 `extract/java.py:250`이 여전히 **name-based over-matching**(`CALLS`가 단순명 같은 모든 메서드에 연결). 정밀 spine 개선(재검토 백로그 T9-PRIMARY)은 **미착수**.
+- **환경 비종속은 기존 불변식으로 이미 박혀 있다**: build-less 전이력 균일(backfill = `git archive` 트리 파싱, ADR-20260702-backfill), recall+load LLM-free(provider-free narrowing, ADR-20260706 §결정3), git=SoT·drop→reload 결정론 재구축. → 새 substrate 역할도 이 불변식 안에서 성립해야 한다.
+- **Glean *도구* 자체는 이미 기각**: ADR-20260706 §결정6 근거 — build-less+다언어+정밀 콜그래프를 동시 만족하는 성숙 도구는 없다(트릴레마). Glean·SCIP·Kythe·stack-graphs 전부 빌드 필요 또는 아카이브라 기각. → 채택하는 건 Glean이라는 **도구가 아니라 pre-computed-queryable이라는 패턴**이고, 그 패턴은 palimpsest가 **소유한 build-less tree-sitter spine + KG projection**으로 실현한다.
+
+## 2. 관계 (다른 주제·이슈와의 얽힘)
+
+- **substrate 후보 = 주제 C / 백로그 T9의 build-less tree-sitter 정밀 spine.** "정규화된 질의가능 팩트"의 생산 엔진이 곧 정밀 spine이다. F는 그 spine을 **무엇에 쓰는가**(코드 품질 이해)를 얹는 소비 관점 → C(생산)와 F(활용)는 상호 의존.
+- **주제 D(test-impact)와 동형**: D도 "정밀 콜그래프 위에서 답하는 상위 질의". F의 "품질 신호"도 같은 spine 위 파생 → C가 D·F 공통 하부.
+- **주제 A(온톨로지 일반화)가 선행**: 품질 신호가 다언어에서 의미 있으려면 FUNCTION 노드·de-Class화(A §5)가 먼저다. Class 가정이 남으면 함수-우선 코드의 품질을 못 잰다.
+- **Curate(생성형) 축의 코드-품질 적용**: "정규화된 패턴 제공 + 가꾸기"가 단순 팩트 노출을 넘어 **안티패턴·리팩터 후보를 합성**하는 데까지 가면, 그건 VISION 핵심기능 Curate(생성형 합성, `docs/VISION.md:36`)의 코드-품질 특화다(이슈 표현 "정체성 축 B"). 그럼 생성형 큐레이터 아크(ADR-20260706, 백로그 T1–T4)의 격리-생산자·form-separation(세탁 금지) 규약을 그대로 상속해야 한다.
+- **ditto#9는 소비자**: palimpsest가 이해·정규화 substrate를 소유하고 ditto ACG는 그걸 소비(환경 비종속·advisory 유지). 이슈 #1이 앵커로 지목한 **ADR-20260712("환경 비종속")는 아직 저장소에 없다**(로컬·origin/main 모두 부재). 원칙은 위 §1 기존 불변식으로 성립하나, 전용 ADR은 미착지 — **drift 주의**.
+
+## 3. substrate 형태 — 후보 (제안, 미확정)
+
+- **F-후보1 (유력): 기존 KG projection 위에 파생.** 품질 신호(메트릭·안티패턴 flag)를 정밀 spine이 채운 그래프 위 **결정론적 계산**으로 얹는다(주제 B의 coverage flag와 동형: LLM 불필요, detect-only). 별도 색인 인프라 없음 → git=SoT·재구축 결정론 무저촉.
+- **F-후보2: 별도 Glean식 색인.** KG로 부족한 질의(대규모 팩트 조인·데이터플로우)가 실제로 생기면 전용 색인. 비용: 두 번째 SoT 위험(재구축 결정론·이중화) → 실측 병목 증거 전엔 안 만든다(§4-3).
+- **표현 위상**: 품질 신호를 **1급 노드/엣지로 materialize** vs **회상 시 계산 채널로 lazy 산출** — 주제 D-Q3(임팩트를 채널 vs materialize)과 같은 축.
+
+## 4. "가꾸기"의 경계 — seed 판단 (미결, 잠그지 않음)
+
+- palimpsest는 **advisory substrate**다: 이해·품질 신호를 **관측 가능**하게 만들 뿐, 실제 코드 변경은 소비자(ditto ACG/개발자) 몫. 이는 stale 감지(주제 B §6: "self-healing 아님, 관측 가능하게만")·seam 대체(`docs/VISION.md:49`) 자세와 정합.
+- **경계 위험**: "안티패턴·리팩터 후보"가 참/거짓 **판정(content-verdict)**으로 굳으면 ADR-20260706의 "content-verdict 외부 유지"(자기인증 회피)와 충돌. 품질 신호는 **근거결박된 관측**(출처+gap+confidence)으로 내보내되 판정을 내부에서 세탁하지 않아야 한다 → F-Q6.
+
+## 5. 미해결 질문 (Open Questions) — 이슈 #1 F-Q 정리
+
+> 순서: **앵커 위상(F-Q4)** → 산출물(F-Q1) → substrate 형태(F-Q3) → 가꾸기 경계(F-Q2) → 측정 기준(F-Q5) → 자기인증 경계(F-Q6, 신규). ★ = 이슈 "다음 단계"가 ADR 승격 게이트로 지목. (F-Q1~5 ID는 이슈 #1과 매핑 유지, 순서만 논리적으로 재배열.)
+
+- **F-Q4 ★ (앵커 위상 — 나머지를 게이팅)**: 코드품질 이해가 **새 최상위 목적(정체성)**인가, 아니면 기존 **Relate/Curate의 코드-품질 특화 적용**인가? 정체성이면 5기능 개정, 특화면 기존 축 아래 슬라이스 — 이 판단이 F-Q1·F-Q2 답을 좁힌다.
+- **F-Q1 ★ (산출물)**: "정규화된 패턴"의 구체 산출물은? 구조 메트릭 / 이해도 신호 / 안티패턴 flag / 리팩터 후보 중 무엇을, 어느 입도로? (실제 질의에 쓰이는 것만 만든다 — 안 쓰이면 안 만든다, §4-3.)
+- **F-Q3 (substrate 형태)**: 기존 KG projection 위 파생(F-후보1)으로 충분한가 vs 별도 Glean식 색인(F-후보2)이 필요한가? git=SoT·drop→reload 결정론을 깨지 않는 선에서.
+- **F-Q2 ★ (가꾸기 주체·경계)**: palimpsest는 이해·신호 substrate만 제공하고 실제 변경은 소비자(ditto ACG/개발자)인가? — advisory·환경 비종속과 정합하는 경계 확정.
+- **F-Q5 (측정 기준)**: "코드베이스 품질 / 이해하기 쉬운 구조"의 **측정 가능한 정의**는? (응집도? 콜그래프 지역성? 명명 일관성?) — 주제 B(coverage/응집)와 겹치는 축을 먼저 정리해야 중복을 안 만든다.
+- **F-Q6 (자기인증 경계 · 신규, 근거결박)**: 안티패턴·리팩터 후보 산출이 내부 **content-verdict**(참/거짓 판정)가 되지 않고 근거결박 관측(출처+gap+confidence)으로 남게 하는 규약은? (ADR-20260706 content-verdict-외부유지 · no-laundering 정합 — §4 경계 위험에서 파생.)
+
+## 다음 단계
+
+F-Q4/F-Q1/F-Q2(앵커·산출물·경계)가 정해지면 그 부분만 ADR로 승격. 그 전까지 주제 C(정밀 spine 생산)·D(test-impact)·A(온톨로지 일반화)·ditto#9와 함께 발전한다. 생산 엔진(C/T9)이 안 서면 F의 품질 신호도 기반이 없으므로 — **C/T9 착지가 F의 실질 선행**이다.
+
 ---
 
 # 변경 이력 (changelog)
@@ -330,3 +382,4 @@ Summary 품질엔 세 축이 있고 서로 다르다. 헷갈리지 않게 정리
 - 2026-07-05 — 주제 C에 §5 방향(direction, 사용자 선호) 추가 — 외부 정적도구 적극 도입 + CodeQL 이중 producer(구조+위험→Risk). 결정론적 CodeQL Risk vs inferred LLM Risk 분류 문제 + C-Q5/Q6 추가.
 - 2026-07-05 — 주제 D(테스트 코드 모델링 & 테스트 임팩트) 추가 — 현재 테스트 미구분(확인), 3갭(구분/COVERS/간접 미인지), 마커+COVERS 엣지+임팩트 회상 제안, 주제 C(정밀 콜그래프)와 상호 강화. D-Q1~4.
 - 2026-07-05 — 주제 E(브랜치 모델링) 추가 — branch property(현재, 인덱스 없음) vs Branch 노드 reify. 성능은 속성 인덱스로 해결, 풀 Branch 노드는 엣지 폭발+identity 이중화라 경량(메타·계보 앵커)만 후보. E-Q1~4.
+- 2026-07-12 — 주제 F(코드베이스 품질 이해·정규화 substrate) 추가 — GitHub issue #1(seed) 물질화. 동기(품질=이해가능 구조 전제, ditto#9의 palimpsest측 동기), substrate=주제 C/T9 build-less tree-sitter spine(Glean *도구*는 트릴레마로 기각·*패턴*만 채택, ADR-20260706 §결정6), advisory 경계(변경은 소비자). F-Q1~5 정리(ID 유지·논리 재배열) + F-Q6(자기인증 경계) 신규. ADR-20260712("환경 비종속")는 이슈 참조하나 저장소 미착지(drift 기록).
