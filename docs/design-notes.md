@@ -9,7 +9,7 @@
 ## 주제 색인
 - **[A] 다언어 온톨로지 확장** — Kotlin/Python/JS·TS 등 함수-우선 언어 지원 (상태: 탐색)
 - **[B] Summary 커버리지·응집 검증** — 요약이 코드를 다 담았나 / 코드가 한 가지만 하나 (상태: 탐색)
-- **[C] 구조 추출 정밀도** — source-only AST(현재) vs semantic 분석(CodeQL)·외부 producer 소비 (상태: 탐색 · **방향 선호: 외부 정적도구 적극 도입 + CodeQL 이중 producer**)
+- **[C] 구조 추출 정밀도** — source-only AST(현재) vs semantic 분석(CodeQL)·외부 producer 소비 (상태: 탐색)
 - **[D] 테스트 코드 모델링 & 테스트 임팩트** — 테스트/프로덕션 구분 + test→target 관계 + 변경→영향 테스트 회상 (상태: 탐색)
 - **[E] 브랜치 모델링** — branch를 property(현재)로 vs Branch 노드로 reify (진입점·계보). 성능은 인덱스로 (상태: 탐색)
 - **[F] 코드베이스 품질 이해·정규화 substrate** — 코드 품질을 이해·정규화 패턴 제공, 구조를 지속 가꾸기(pre-compute 질의가능 팩트층). ditto#9의 palimpsest측 동기 (상태: 탐색 · seed)
@@ -218,19 +218,7 @@ Summary 품질엔 세 축이 있고 서로 다르다. 헷갈리지 않게 정리
 - 빌드/이력 제약도 다언어에 그대로: CodeQL 다언어 정밀은 HEAD-only, 이력 spine은 언어별 빌드리스 필요.
 - **재프레임**: 주제 A 비용이 "N개 파서 작성 + 온톨로지 일반화 + 빌드리스 spine" → **"외부 IR 매핑 + 온톨로지 일반화 + 빌드리스 spine"**. 파서 작성만 줄고, 온톨로지·이력 작업은 남는다.
 
-## 5. 방향(direction) — 사용자 선호 [2026-07-05]
-
-> 아직 ADR 아님(소프트 방향). 확정 시 ADR로 승격.
-
-- **파싱/분석은 외부 정적도구를 적극 도입한다** — 자체 tree-sitter 확장보다 검증된 외부 엔진(CodeQL 등) 채택 우선.
-- **CodeQL을 이중 producer로 쓴다**: ① 구조 팩트(콜그래프·타입·deps) → 구조층, ② **보안/위험 findings → `Risk` 노드 + `RISKS` 엣지**. CodeQL의 본령이 취약점 분석(variant analysis·taint·CWE, GitHub code scanning 엔진)이므로, 지금 외부 생산자를 기다리는 **반쪽 Risk 층을 CodeQL이 채운다** — "부수효과"가 아니라 사실상 Risk 생산자.
-
-### 이 방향이 여는 분류 문제 (§2 no-laundering과 얽힘)
-- 지금 `Risk`는 **inferred(LLM 판단)** 계층(`edge_kind=inferred`, `semantic_verdict`). 그러나 **CodeQL risk는 결정론적**(빌드 있으면 규칙 기반 재현, LLM 아님) — deterministic과 inferred **사이**(재현 가능하되 쿼리에 판단이 담김).
-- → "**도구 유래 결정론적 위험** vs **LLM 추론 위험**"을 구분·표기해야. DITTO의 `extracted_by:'codeql'` provenance 마커가 참조: Risk 노드에 **누가 찾았나**를 박고 세탁 금지 불변식과 정합.
-- 커버리지: CodeQL risk도 **빌드 의존 → HEAD-only**(구조 엣지와 같은 이력 비대칭).
-
-## 6. 미해결 질문 (Open Questions)
+## 5. 미해결 질문 (Open Questions)
 
 - **C-Q1**: 이력 spine을 tree-sitter로 유지 vs SCIP/stack-graphs/Glean로 빌드리스 정밀 해석 도입?
 - **C-Q2**: CodeQL overlay를 palimpsest가 직접 실행 vs **DITTO 산출을 소비**?
@@ -383,3 +371,4 @@ F-Q4/F-Q1/F-Q2(앵커·산출물·경계)가 정해지면 그 부분만 ADR로 �
 - 2026-07-05 — 주제 D(테스트 코드 모델링 & 테스트 임팩트) 추가 — 현재 테스트 미구분(확인), 3갭(구분/COVERS/간접 미인지), 마커+COVERS 엣지+임팩트 회상 제안, 주제 C(정밀 콜그래프)와 상호 강화. D-Q1~4.
 - 2026-07-05 — 주제 E(브랜치 모델링) 추가 — branch property(현재, 인덱스 없음) vs Branch 노드 reify. 성능은 속성 인덱스로 해결, 풀 Branch 노드는 엣지 폭발+identity 이중화라 경량(메타·계보 앵커)만 후보. E-Q1~4.
 - 2026-07-12 — 주제 F(코드베이스 품질 이해·정규화 substrate) 추가 — GitHub issue #1(seed) 물질화. 동기(품질=이해가능 구조 전제, ditto#9의 palimpsest측 동기), substrate=주제 C/T9 build-less tree-sitter spine(Glean *도구*는 트릴레마로 기각·*패턴*만 채택, ADR-20260706 §결정6), advisory 경계(변경은 소비자). F-Q1~5 정리(ID 유지·논리 재배열) + F-Q6(자기인증 경계) 신규. ADR-20260712("환경 비종속")는 이슈 참조하나 저장소 미착지(drift 기록).
+- 2026-07-12 — drift 정리 — 주제 C §5(방향: 외부도구 적극도입 + CodeQL 이중 producer)와 색인 방향 라벨 삭제 — ADR-20260706 §결정6이 spine 주·CodeQL 보조로 역전했으므로. §6 미해결 질문 → §5 재번호. 정확한 방향은 ADR-20260706·ADR-20260712·재검토 백로그에 있음.

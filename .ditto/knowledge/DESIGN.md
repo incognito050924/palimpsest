@@ -44,11 +44,11 @@
 ## 3. 아키텍처
 
 - ✅ **git = SoT.** KG는 재구축 가능한 projection, 벡터는 보완. (ADR-20260626 #2, 잠긴 결정 #2)
-- ✅ **provider-free 불변식(slice 4~):** palimpsest 코드는 LLM을 직접 호출하지 않는다. 생성(요약·검증·재생성)은 전적으로 외부 에이전트, palimpsest는 결과 payload를 근거결박으로 적재·회상만 한다. 테스트는 hermetic(키·네트워크 없이 재현), 회상·적재 경로에 생성형 라이브러리 0을 fresh-interpreter probe로 강제. (ADR-20260701-semantic-layer-load-contract 결정 #1)
+- ✅ **provider-free 불변식 — 경로-스코프(ADR-20260706 §결정3 정련):** palimpsest의 **recall+load 경로**는 LLM-free다(경로-스코프 fresh-interpreter probe로 강제·green 유지). 생성(요약 등)은 **격리된 opt-in in-process 생산자 또는 외부**가 담당하되, 어느 쪽이든 payload를 git-SoT로 선(先)물질화한 뒤 기존 멱등 inferred 로더를 통과한다. **content-verdict(판정)는 외부 유지**(생성자≠검증자). 테스트는 hermetic(키·네트워크 없이 재현). (ADR-20260701 §결정1의 전역 해석을 ADR-20260706 §결정3이 전역→경로-스코프로 정련)
 - 🔶 **컴포넌트(제안):**
   - **Capture** — git(커밋·diff·브랜치) → 추출 → 중간표현(IR). (확장: 문서·대화·에이전트 트레이스). 자동 기본 + 실시간/배치/명시 혼합.
   - **KG Store** — 그래프 DB(🔶 Neo4j 1차) + 네이티브 벡터 인덱스. provenance·신선도 부착.
-  - **Recall/Curate** — GraphRAG: 그래프 탐색 + 벡터 + LLM 합성. 조합형(계보·여정) + 생성형(근거 결박, 외부 생성).
+  - **Recall/Curate** — GraphRAG: 그래프 탐색 + 벡터 + LLM 합성. 조합형(계보·여정) + 생성형(근거 결박; 격리 opt-in 생산자 또는 외부, git 선물질화 후 적재 — ADR-20260706).
   - **Exposure Adapter** — 얇은 층. 코어를 노출 메커니즘에서 분리.
 - 🔶 **데이터 흐름:** `git → Capture → IR → KG build/update(provenance·신선도) → Recall(query) → Curate(synthesize, grounded) → Adapter → 소비자`. 의미층은 `외부 생성 요약 → 적재 계약(근거결박) → KG(inferred) → 회상 summaries 채널`.
 - ✅ **노출 독립:** 코어(KG·GraphRAG)는 노출 메커니즘과 무관. 노출은 갈아끼우는 어댑터. ditto 내부 구조에 비의존.
@@ -62,7 +62,7 @@
 | **Preserve** ✅ | git 변경 | KG 노드·엣지 생성/갱신 + provenance·신선도 | 보존된 KG 조각 | 전 이력 보존 |
 | **Relate** ✅ | 엔티티들 | 코드·결정·의도·여정 간 관계 투영 | 질의 가능한 그래프 | 벡터 보완 |
 | **Recall** ✅ | 작업 맥락 질의 | 필요분만 점진 회상(🔶 pull 우선, push 확장) | 관련 조각(토큰 예산 내) | context rot 회피 |
-| **Curate** ◐ | 회상된 자료 | 조합형(계보·여정 구성, ✅) + 생성형(외부 LLM 합성, 적재만 ✅ slice 4) | 답 + **출처+gap+confidence** | 세탁 금지, provider-free |
+| **Curate** ◐ | 회상된 자료 | 조합형(계보·여정 구성, ✅) + 생성형(격리 opt-in 생산자 또는 외부 합성, git 선물질화 후 적재 — ADR-20260706) | 답 + **출처+gap+confidence** | 세탁 금지, recall+load만 LLM-free |
 | **Reconcile** ✅ | 브랜치 간 컨텍스트(개인↔팀) | 차이 인정 → 신선도·우선순위 판정 | 무엇이 더 신선/우선인지 | `reconcile_recall` N-way peer 판정 실현(wi_260702y0d); 설계위험 감지(slice 2, wi_260702qe3)가 그 씨앗 |
 
 ⬜ 각 기능의 상세 동작·계약은 슬라이스별로 구체화.
