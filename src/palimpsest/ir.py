@@ -48,6 +48,9 @@ PACKAGE = "Package"
 FILE = "File"
 CLASS = "Class"
 METHOD = "Method"
+# A module-level function (no declaring class) — a first-class callable symbol
+# distinct from METHOD. Participates in the same deterministic CALLS ontology.
+FUNCTION = "Function"
 # A Community groups Classes that form a connected component at the Class level
 # (via cross-class CALLS / DEPENDS_ON) — a deterministic, rebuild-stable partition.
 COMMUNITY = "Community"

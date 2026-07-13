@@ -10,6 +10,9 @@ dependencies = [
     # to a concrete syntax tree; py-tree-sitter is the runtime binding.
     "tree-sitter>=0.23",
     "tree-sitter-java>=0.23",
+    # Static Kotlin extraction -> IR (n3-impl-kotlin-extract). Same tree-sitter
+    # runtime; per-language grammar + queries/kotlin/*.scm (ADR-20260706 §결정6).
+    "tree-sitter-kotlin>=1.1.0",
     # KG ingest (n3-impl-kg-ingest). Official Neo4j driver; raw Cypher, batched
     # UNWIND + MERGE. No neo4j-graphrag (defers LLM-synthesis paths, ac-3).
     "neo4j>=5.14",

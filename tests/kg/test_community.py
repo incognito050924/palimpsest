@@ -8,7 +8,20 @@ import copy
 
 import pytest
 
-from palimpsest.ir import CLASS, COMMUNITY, MEMBER_OF, REPO, Provenance
+from palimpsest.ir import (
+    CALLS,
+    CLASS,
+    COMMUNITY,
+    CONTAINS,
+    FILE,
+    FUNCTION,
+    MEMBER_OF,
+    REPO,
+    Edge,
+    IR,
+    Node,
+    Provenance,
+)
 from palimpsest.kg import (
     augment_communities,
     community_id,
@@ -51,6 +64,53 @@ def test_cross_package_linked_classes_cluster_into_one_community(ir):
 
     comm = next(p for p in parts if CTRL in p)
     assert SVC in comm  # the two linked classes share one community
+
+
+def _kotlin_modules_ir() -> IR:
+    """A pure hand-built IR modelling two Kotlin modules (Files carrying only
+    top-level Functions, no Class) plus a third isolated module.
+
+    Module A's top-level function CALLS module B's top-level function, so at the
+    grouping-container level the two Files must land in one Community. Module C
+    is unlinked and forms its own singleton. This exercises the generalization
+    from Class-only grouping to unit-of grouping (Method->Class, Function->File)
+    without any Neo4j round-trip — it is a pure union-find assertion over the IR.
+    """
+    prov = Provenance(source_commit="deadbeef", author="kt <kt@x>", committed_at="t0")
+
+    def n(kind: str, qn: str) -> Node:
+        return Node(kind=kind, qualified_name=qn, name=qn, provenance=prov)
+
+    nodes = [
+        n(FILE, "src/A.kt"),
+        n(FILE, "src/B.kt"),
+        n(FILE, "src/C.kt"),
+        n(FUNCTION, "app.a.topA"),
+        n(FUNCTION, "app.b.topB"),
+        n(FUNCTION, "app.c.topC"),
+    ]
+    edges = [
+        Edge(kind=CONTAINS, src="src/A.kt", dst="app.a.topA", provenance=prov),
+        Edge(kind=CONTAINS, src="src/B.kt", dst="app.b.topB", provenance=prov),
+        Edge(kind=CONTAINS, src="src/C.kt", dst="app.c.topC", provenance=prov),
+        # cross-module top-level call: A.topA -> B.topB
+        Edge(kind=CALLS, src="app.a.topA", dst="app.b.topB", provenance=prov),
+    ]
+    return IR(nodes=nodes, edges=edges)
+
+
+def test_cross_module_top_level_functions_cluster_into_one_community():
+    # ac-3: two Kotlin modules whose top-level Functions CALL each other are
+    # grouped by their containing File (Module) and land in ONE Community.
+    parts = compute_communities(_kotlin_modules_ir())
+
+    # exclusive, flat partition over the grouping containers (the three Files)
+    flat = sorted(c for part in parts for c in part)
+    assert flat == ["src/A.kt", "src/B.kt", "src/C.kt"]
+
+    comm = next(p for p in parts if "src/A.kt" in p)
+    assert "src/B.kt" in comm          # linked modules share one community
+    assert ["src/C.kt"] in parts       # isolated module is its own singleton
 
 
 def _count(driver, cypher, **params):

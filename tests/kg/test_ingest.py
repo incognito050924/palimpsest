@@ -6,6 +6,7 @@ Vertical slices against a LIVE Neo4j (see conftest). One behavior at a time.
 from collections import Counter
 
 from palimpsest.ir import REPO, PACKAGE, FILE, CLASS, METHOD, CONTAINS, IMPORTS, CALLS, DEPENDS_ON
+from palimpsest.ir import IR, Node, Edge, FUNCTION, Provenance
 
 
 NODE_LABELS = [REPO, PACKAGE, FILE, CLASS, METHOD]
@@ -170,6 +171,63 @@ def test_reingest_is_idempotent(clean_db, ir):
 
     assert second_nodes == first_nodes
     assert second_rels == first_rels
+
+
+def test_function_nodes_and_calls_edge_roundtrip(clean_db):
+    """FUNCTION is a first-class node kind: a module-level function (no declaring
+    class) must ingest as a :Function node and participate in the deterministic
+    CALLS ontology, exactly like Method.
+
+    AC-2: a hand-built IR of two module-level functions in one File —
+    (:File)-[:CONTAINS]->(:Function) for each, and (:Function)-[:CALLS]->(:Function)
+    between them — must roundtrip through ingest and re-query as 2 Function nodes
+    and 1 CALLS edge. Before FUNCTION was registered in ``NODE_LABELS`` the ingest
+    could not bucket a Function node at all, so this pins the new kind end-to-end.
+    """
+    prov = Provenance(
+        source_commit="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        author="fixture <fixture@example.com>",
+        committed_at="2026-07-13T00:00:00+09:00",
+    )
+    file_qn = "pkg/mod.py"
+    alpha_qn = "pkg/mod.py::alpha"
+    beta_qn = "pkg/mod.py::beta"
+    ir = IR(
+        nodes=[
+            Node(kind=FILE, qualified_name=file_qn, name="mod.py", provenance=prov,
+                 path=file_qn),
+            Node(kind=FUNCTION, qualified_name=alpha_qn, name="alpha", provenance=prov,
+                 path=file_qn, start_line=1, end_line=3),
+            Node(kind=FUNCTION, qualified_name=beta_qn, name="beta", provenance=prov,
+                 path=file_qn, start_line=5, end_line=7),
+        ],
+        edges=[
+            Edge(kind=CONTAINS, src=file_qn, dst=alpha_qn, provenance=prov),
+            Edge(kind=CONTAINS, src=file_qn, dst=beta_qn, provenance=prov),
+            Edge(kind=CALLS, src=alpha_qn, dst=beta_qn, provenance=prov),
+        ],
+    )
+
+    from palimpsest.kg import ingest
+
+    ingest(clean_db, ir)
+
+    # Two Function nodes landed with their file:line grounding.
+    assert label_count(clean_db, FUNCTION) == 2
+    with clean_db.session() as session:
+        beta = session.run(
+            "MATCH (f:Function {id: $id}) RETURN f", id=beta_qn
+        ).single()["f"]
+    assert beta["qualified_name"] == beta_qn
+    assert beta["start_line"] == 5
+
+    # Exactly one Function -[:CALLS]-> Function edge, and it is deterministic.
+    with clean_db.session() as session:
+        calls = session.run(
+            "MATCH (a:Function)-[r:CALLS]->(b:Function) "
+            "RETURN a.id AS src, b.id AS dst, r.edge_kind AS kind"
+        ).data()
+    assert calls == [{"src": alpha_qn, "dst": beta_qn, "kind": "deterministic"}]
 
 
 def _plan_operators(plan) -> list:
