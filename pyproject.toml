@@ -59,5 +59,10 @@ build-backend = "hatchling.build"
 packages = ["src/palimpsest"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# "src" puts the package on the path; "." puts the REPO ROOT on it so a test that
+# imports a sibling as a module (e.g. `from tests.e2e.conftest import …`) resolves
+# under any runner. `python -m pytest` injects the CWD implicitly, but plain
+# `pytest` / `uv run pytest` do not — without the root here, collection of such a
+# module fails with `No module named 'tests'` (issue #16).
+pythonpath = ["src", "."]
 testpaths = ["tests"]
