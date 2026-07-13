@@ -5,6 +5,8 @@ Vertical slices against a LIVE Neo4j (see conftest). One behavior at a time.
 
 from collections import Counter
 
+import pytest
+
 from palimpsest.ir import REPO, PACKAGE, FILE, CLASS, METHOD, CONTAINS, IMPORTS, CALLS, DEPENDS_ON
 from palimpsest.ir import IR, Node, Edge, FUNCTION, Provenance
 
@@ -259,3 +261,39 @@ def test_relation_merge_resolves_endpoints_by_index_not_scan(clean_db):
     ops = _plan_operators(plan)
     assert "AllNodesScan@neo4j" not in ops, ops
     assert any("IndexSeek" in op for op in ops), ops
+
+
+def test_unregistered_edge_kind_fails_closed_before_cypher():
+    """An edge whose kind is not in ``REL_TYPES`` must fail closed at the grouping
+    boundary — symmetric to the node-label KeyError (``nodes_by_label[n.kind]``) —
+    so a rel type derived from parsed source can never reach the ``_REL_MERGE``
+    ``.format()`` interpolation sink. The guard fires BEFORE ``driver.session()``,
+    so no live DB is needed to prove it (the stub driver raises if session is hit).
+    """
+    prov = Provenance(
+        source_commit="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        author="fixture <fixture@example.com>",
+        committed_at="2026-07-13T00:00:00+09:00",
+    )
+    a_qn, b_qn = "pkg/mod.py", "pkg/other.py"
+    ir = IR(
+        nodes=[
+            Node(kind=FILE, qualified_name=a_qn, name="mod.py", provenance=prov, path=a_qn),
+            Node(kind=FILE, qualified_name=b_qn, name="other.py", provenance=prov, path=b_qn),
+        ],
+        # Both endpoints resolve to real File nodes, so the edge reaches the
+        # interpolation path — only its KIND is illegal.
+        edges=[Edge(kind="NOT_A_REL_TYPE", src=a_qn, dst=b_qn, provenance=prov)],
+    )
+
+    class _NoSessionDriver:
+        def session(self, *args, **kwargs):
+            raise AssertionError(
+                "ingest reached driver.session() — the edge-kind guard did not fire "
+                "before Cypher interpolation"
+            )
+
+    from palimpsest.kg import ingest
+
+    with pytest.raises(KeyError):
+        ingest(_NoSessionDriver(), ir)

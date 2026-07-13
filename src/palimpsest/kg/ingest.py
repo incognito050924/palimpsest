@@ -270,6 +270,17 @@ def ingest(driver, ir: IR) -> None:
         dst_label = id_to_label.get(e.dst)
         if src_label is None or dst_label is None:
             continue
+        # Fail closed on an unregistered rel type before it reaches the
+        # ``_REL_MERGE`` ``.format`` interpolation — symmetric to the node-label
+        # guard (``nodes_by_label[n.kind]`` raises ``KeyError`` for an unregistered
+        # kind). Enforces the load-bearing invariant "edge kinds are REL_TYPES
+        # constants" at the ingest boundary, so a rel type ever derived from parsed
+        # source can never be interpolated into Cypher.
+        if e.kind not in REL_TYPES:
+            raise KeyError(
+                f"edge kind {e.kind!r} is not a registered REL_TYPES member "
+                f"({REL_TYPES})"
+            )
         edges_by_group[(e.kind, src_label, dst_label)].append(_edge_row(e))
 
     episodes = _episode_rows(ir)
