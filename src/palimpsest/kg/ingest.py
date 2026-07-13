@@ -116,7 +116,8 @@ SET r.edge_kind     = $edge_kind,
     r.source_commit = row.source_commit,
     r.author        = row.author,
     r.committed_at  = row.committed_at,
-    r.code_bound_at = row.committed_at
+    r.code_bound_at = row.committed_at,
+    r.resolution    = row.resolution
 """
 
 _EPISODE_MERGE = """
@@ -257,6 +258,10 @@ def _edge_row(edge) -> dict:
         "source_commit": p.source_commit,
         "author": p.author,
         "committed_at": p.committed_at,
+        # resolution-precision marker — ONLY the name-resolved reference kinds
+        # carry it; structural kinds project None -> Cypher null -> property
+        # dropped (additive, mirrors the node markers is_test/server_only/role).
+        "resolution": edge.resolution if edge.kind in (CALLS, DEPENDS_ON) else None,
     }
 
 

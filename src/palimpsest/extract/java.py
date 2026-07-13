@@ -226,6 +226,11 @@ class _FileWalker:
         self.class_supertypes: dict[str, set[str]] = {}
         # simple names of single-type imports in this file (attributed to its classes)
         self.import_simple: set[str] = set()
+        # single-type imports as simple-name -> FQN (narrows same-simple-name
+        # cross-package collisions for CALLS/DEPENDS_ON resolution; wildcard imports
+        # cannot narrow so are excluded). Java forbids two imports sharing a simple
+        # name, so the map is unambiguous.
+        self.import_qualified: dict[str, str] = {}
         self.file_classes: list[str] = []
         # test-impact signals accumulated over the walk (see _is_test_path etc.).
         self.imports_junit = False
@@ -276,7 +281,9 @@ class _FileWalker:
             # imports, a Package for `a.b.*`). Resolution is by node-id match.
             self._edge(IMPORTS, self.rel_path, target)
             if not wildcard:
-                self.import_simple.add(target.split(".")[-1])
+                simple = target.split(".")[-1]
+                self.import_simple.add(simple)
+                self.import_qualified[simple] = target
             if _is_junit_import(target):
                 self.imports_junit = True
 
@@ -479,20 +486,48 @@ def _index_by_simple_name(nodes: list[Node], kind: str) -> dict[str, list[str]]:
     return idx
 
 
+def _import_narrows_to(
+    simple: str, candidates: list[str], file_imports: dict[str, str]
+) -> str | None:
+    """If the file's single-type imports qualify ``simple`` to exactly one of the
+    corpus ``candidates`` (a same-simple-name cross-package collision), return that
+    FQN; else None (no narrowing possible — collision stays ambiguous)."""
+    fqn = file_imports.get(simple)
+    return fqn if fqn in candidates else None
+
+
 def _depends_on_edges(
-    nodes: list[Node], class_refs: dict[str, set[str]], prov: Provenance
+    nodes: list[Node],
+    class_refs: dict[str, set[str]],
+    imports_by_path: dict[str, dict[str, str]],
+    prov: Provenance,
 ) -> list[Edge]:
     by_simple = _index_by_simple_name(nodes, CLASS)
-    seen: set[tuple[str, str]] = set()
-    out: list[Edge] = []
+    class_path = {n.qualified_name: n.path for n in nodes if n.kind == CLASS}
+    # Accumulator (constraint A): (src,dst) -> resolution, monotone typed>name join.
+    # DEPENDS_ON has no typed path today, so every edge is "name"; the dict form keeps
+    # dedup order-independent and mirrors the CALLS join.
+    acc: dict[tuple[str, str], str] = {}
     for src_fqn, refs in class_refs.items():
+        file_imports = imports_by_path.get(class_path.get(src_fqn, ""), {})
         for ref in refs:
-            for dst_fqn in by_simple.get(ref, ()):
-                if dst_fqn == src_fqn or (src_fqn, dst_fqn) in seen:
+            cands = list(by_simple.get(ref, ()))
+            if len(cands) > 1:
+                # ac-3: a simple name resolving to >1 same-simple-name class across
+                # packages is disambiguated to the imported FQN when the file imports
+                # it (drop the false edges to other-package same-name classes). Without
+                # a narrowing import, keep all edges (no false negatives).
+                narrowed = _import_narrows_to(ref, cands, file_imports)
+                if narrowed is not None:
+                    cands = [narrowed]
+            for dst_fqn in cands:
+                if dst_fqn == src_fqn:
                     continue
-                seen.add((src_fqn, dst_fqn))
-                out.append(Edge(kind=DEPENDS_ON, src=src_fqn, dst=dst_fqn, provenance=prov))
-    return out
+                acc.setdefault((src_fqn, dst_fqn), "name")
+    return [
+        Edge(kind=DEPENDS_ON, src=s, dst=d, provenance=prov, resolution=r)
+        for (s, d), r in acc.items()
+    ]
 
 
 def _calls_edges(
@@ -501,6 +536,7 @@ def _calls_edges(
     field_bindings: list[Binding],
     local_bindings: list[Binding],
     class_supertypes: dict[str, set[str]],
+    imports_by_path: dict[str, dict[str, str]],
     prov: Provenance,
 ) -> list[Edge]:
     """CALLS (Method->Method) resolved by the receiver's static type + hierarchy.
@@ -569,15 +605,41 @@ def _calls_edges(
             if owner is not None:
                 sym_method[owner][name] = type_simple
 
-    seen: set[tuple[str, str]] = set()
-    out: list[Edge] = []
+    # Accumulator (constraint A): (src,dst) -> resolution, with the monotone join
+    # typed ∨ name = typed. An incoming "typed" UPGRADES a stored "name"; "name" never
+    # downgrades a stored "typed". Emitting from the accumulated dict at the end makes
+    # the marker independent of call-site source order (the same src->dst reachable from
+    # both a typed and a name-fallback call site resolves "typed" either way). First-seen
+    # key order preserves the prior deterministic edge order.
+    acc: dict[tuple[str, str], str] = {}
+
+    def _typed_seed(simple: str, file_imports: dict[str, str]) -> tuple[set[str], bool]:
+        """Resolve a simple receiver/static type name to its corpus seed classes plus a
+        precise flag. A same-simple-name cross-package collision (>1 candidate) that the
+        file's imports narrow to one FQN is NARROWED to that class — the false edges to
+        other-package same-name classes are DROPPED (ac-2 truthfulness), exactly as
+        ``_depends_on_edges`` narrows DEPENDS_ON. The survivor is precisely typed. A
+        collision that imports cannot narrow keeps ALL candidates but is a name guess
+        (constraint B): precise=False so the edges are marked "name", NOT "typed" (recall
+        unchanged — no import-qualification of the whole CALLS path, no overload
+        resolution). A single candidate is precise as-is."""
+        cands = list(class_by_simple.get(simple, ()))
+        if len(cands) > 1:
+            narrowed = _import_narrows_to(simple, cands, file_imports)
+            if narrowed is not None:
+                return {narrowed}, True
+            return set(cands), False
+        return set(cands), True
+
     for path, line, name, kind, value in call_sites:
         src = _innermost(method_ranges.get(path, []), line)
         if src is None:
             continue
         src_class = src.split("#", 1)[0]
+        file_imports = imports_by_path.get(path, {})
         seed: set[str] = set()
         block_fallback = False  # a definitely-known receiver type never name-falls-back
+        precise = True  # whether the seed's static type is precisely resolved
         if kind == "self":
             # unqualified / this: enclosing class, but a static import may resolve
             # elsewhere — allow name-based fallback if the hierarchy has no match.
@@ -585,13 +647,13 @@ def _calls_edges(
         elif kind == "name":
             typ = sym_method[src].get(value) or sym_field[src_class].get(value)
             if typ:
-                seed = set(class_by_simple.get(typ, ()))
+                seed, precise = _typed_seed(typ, file_imports)
                 block_fallback = True
             elif value in class_by_simple:  # static call on a corpus class: ClassName.m()
-                seed = set(class_by_simple[value])
+                seed, precise = _typed_seed(value, file_imports)
                 block_fallback = True
         elif kind == "type" and value:  # new T().m()
-            seed = set(class_by_simple.get(value, ()))
+            seed, precise = _typed_seed(value, file_imports)
             block_fallback = True
 
         candidates: set[str] = set()
@@ -600,15 +662,29 @@ def _calls_edges(
         dsts: list[str] = []
         for tc in sorted(candidates):  # sorted -> deterministic edge order
             dsts.extend(methods_by_class_name.get((tc, name), ()))
-        if not dsts and not block_fallback:
-            dsts = list(methods_by_name.get(name, ()))
+        if dsts:
+            # produced via the resolved-type / candidates path: typed unless the seed
+            # was an unnarrowed simple-name collision (constraint B -> "name").
+            resolution = "typed" if precise else "name"
+        elif not block_fallback:
+            dsts = list(methods_by_name.get(name, ()))  # NAME fallback (~603-604)
+            resolution = "name"
+        else:
+            resolution = "name"  # no dsts; value unused
 
         for dst in dsts:
-            if dst == src or (src, dst) in seen:
+            if dst == src:
                 continue
-            seen.add((src, dst))
-            out.append(Edge(kind=CALLS, src=src, dst=dst, provenance=prov))
-    return out
+            key = (src, dst)
+            prev = acc.get(key)
+            if prev == "typed":
+                continue  # typed never downgrades
+            if prev is None or resolution == "typed":
+                acc[key] = resolution
+    return [
+        Edge(kind=CALLS, src=s, dst=d, provenance=prov, resolution=r)
+        for (s, d), r in acc.items()
+    ]
 
 
 def _iter_java_files(root: Path):
@@ -635,6 +711,7 @@ def extract(root: Path | str, provenance: Provenance, repo_name: str | None = No
     call_sites: list[CallSite] = []
     field_bindings: list[Binding] = []
     local_bindings: list[Binding] = []
+    imports_by_path: dict[str, dict[str, str]] = {}
 
     for path in _iter_java_files(root):
         source = path.read_bytes()
@@ -649,6 +726,7 @@ def extract(root: Path | str, provenance: Provenance, repo_name: str | None = No
         for fqn, refs in walker.class_refs.items():
             class_refs.setdefault(fqn, set()).update(refs)
         class_supertypes.update(walker.class_supertypes)
+        imports_by_path[rel] = walker.import_qualified
         scan = _scan_calls_and_bindings(rel, tree.root_node)
         call_sites.extend(scan.calls)
         field_bindings.extend(scan.field_bindings)
@@ -656,10 +734,13 @@ def extract(root: Path | str, provenance: Provenance, repo_name: str | None = No
 
     # DEPENDS_ON (Class->Class): resolve referenced simple type names against
     # known classes by unqualified name (best-effort, no full type resolution).
-    edges.extend(_depends_on_edges(nodes, class_refs, provenance))
+    edges.extend(_depends_on_edges(nodes, class_refs, imports_by_path, provenance))
     # CALLS (Method->Method): resolved by the receiver's static type + hierarchy.
     edges.extend(
-        _calls_edges(nodes, call_sites, field_bindings, local_bindings, class_supertypes, provenance)
+        _calls_edges(
+            nodes, call_sites, field_bindings, local_bindings,
+            class_supertypes, imports_by_path, provenance,
+        )
     )
 
     # Repo node + Package nodes + Repo->Package CONTAINS
