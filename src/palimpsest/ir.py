@@ -483,6 +483,13 @@ class Summary:
     # ``{"verdict": "faithful"|"unfaithful"|"unverified", "judge": str, "model": str}``.
     # palimpsest never produces this; it only ingests it. Absent -> None (unverified).
     semantic_verdict: Optional[dict] = None
+    # An EXTERNAL judge's COVERAGE verdict — the code->claim completeness axis,
+    # INDEPENDENT of ``semantic_verdict`` (claim->code faithfulness). Kept on its own
+    # field so the two axes never overload each other. Shape is the judge's contract
+    # (e.g. ``{"verdict": "complete"|"incomplete"|"unverified", "uncovered": [...],
+    # "judge": str, "model": str}``); palimpsest never produces it, only ingests it.
+    # Absent -> None (uncovered/unverified).
+    coverage_verdict: Optional[dict] = None
     # An EXTERNAL embedding of the summary, produced elsewhere and handed in
     # (provider-free: palimpsest never generates one). ``embedding`` is the vector
     # (float[EMBEDDING_DIM]); ``embedding_model`` names the model that produced it
@@ -504,6 +511,7 @@ class Summary:
             "prompt": self.prompt,
             "confidence": self.confidence,
             "semantic_verdict": self.semantic_verdict,
+            "coverage_verdict": self.coverage_verdict,
             "embedding": list(self.embedding) if self.embedding is not None else None,
             "embedding_model": self.embedding_model,
             "embedding_dim": self.embedding_dim,
@@ -522,6 +530,7 @@ class Summary:
             prompt=data.get("prompt"),
             confidence=data.get("confidence"),
             semantic_verdict=data.get("semantic_verdict"),
+            coverage_verdict=data.get("coverage_verdict"),
             embedding=list(embedding) if embedding is not None else None,
             embedding_model=data.get("embedding_model"),
             embedding_dim=data.get("embedding_dim"),

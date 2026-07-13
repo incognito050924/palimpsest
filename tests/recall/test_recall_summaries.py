@@ -156,6 +156,35 @@ def test_unfaithful_verdict_loads_and_surfaces_in_summaries_channel(recall_db):
     assert entry["semantic_verdict"] == verdict
 
 
+COVERAGE_GENERATOR = GENERATOR + "-coverage"  # distinct summary-id space
+
+
+def test_coverage_verdict_loads_and_surfaces_in_summaries_channel(recall_db):
+    """An external judge's coverage verdict (code->claim completeness) LOADS and the
+    recall summaries channel exposes it as an annotate-only flag, INDEPENDENT of
+    `semantic_verdict`. palimpsest itself never judges; it only ingests the verdict."""
+    coverage = {"verdict": "incomplete", "judge": "ditto", "model": "judge-model-v1",
+                "uncovered": ["some.other#Node()"]}
+    s = Summary(
+        target_id=CTRL_METHOD,
+        claims=(SummaryClaim(text="Selects attendance-condition rows.",
+                             source_refs=(CTRL_METHOD,)),),
+        generator=COVERAGE_GENERATOR, model=MODEL, source_commit=SOURCE_COMMIT,
+        created_at="2026-07-01T09:00:00+09:00",
+        coverage_verdict=coverage,
+    )
+    res = load_summaries(recall_db, [s])
+    # Annotate, not reject: an incomplete-coverage verdict still loads.
+    assert res.loaded == 1 and res.rejected == 0, res.rejections
+
+    sid = summary_id(CTRL_METHOD, COVERAGE_GENERATOR, MODEL, SOURCE_COMMIT)
+    out = recall(recall_db, CTRL_METHOD, depth=1, limit=25)
+    entry = next(e for e in out["summaries"] if e["id"] == sid)
+    assert entry["coverage_verdict"] == coverage
+    # Independent of faithfulness: absent semantic_verdict stays None.
+    assert entry["semantic_verdict"] is None
+
+
 # --- #4 staleness (detect/flag only) -------------------------------------
 
 STALE_GENERATOR = GENERATOR + "-stale"  # distinct id-space from summarized_db

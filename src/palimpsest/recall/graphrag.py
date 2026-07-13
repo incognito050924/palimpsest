@@ -109,6 +109,7 @@ WITH DISTINCT s
 MATCH (s)-[r:SUMMARIZES]->(g)
 RETURN s.id AS id, s.target_id AS target_id, s.claims AS claims,
        s.code_bound_at AS code_bound_at, s.semantic_verdict AS semantic_verdict,
+       s.coverage_verdict AS coverage_verdict,
        r.edge_kind AS edge_kind,
        g.id AS ref_id, g.source_commit AS source_commit, g.path AS path,
        g.start_line AS start_line, g.end_line AS end_line,
@@ -221,6 +222,14 @@ def _summary_channel(rows) -> list:
                 "semantic_verdict": (
                     json.loads(row["semantic_verdict"])
                     if row.get("semantic_verdict")
+                    else None
+                ),
+                # Coverage verdict (code->claim completeness) — a separate,
+                # independent annotate-only axis, parsed like semantic_verdict;
+                # absent -> None. palimpsest surfaces only what a judge ingested.
+                "coverage_verdict": (
+                    json.loads(row["coverage_verdict"])
+                    if row.get("coverage_verdict")
                     else None
                 ),
                 "refs": [],
@@ -860,6 +869,7 @@ WHERE $branches IS NULL OR tgt.branch IN $branches
 MATCH (s)-[r:SUMMARIZES]->(g)
 RETURN s.id AS id, s.target_id AS target_id, s.claims AS claims,
        s.code_bound_at AS code_bound_at, s.semantic_verdict AS semantic_verdict,
+       s.coverage_verdict AS coverage_verdict,
        r.edge_kind AS edge_kind, score AS score, tgt.branch AS branch,
        g.id AS ref_id, g.source_commit AS source_commit, g.path AS path,
        g.start_line AS start_line, g.end_line AS end_line,

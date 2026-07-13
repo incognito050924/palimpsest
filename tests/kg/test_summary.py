@@ -126,6 +126,42 @@ def test_semantic_verdict_absent_defaults_to_none_backward_compatible():
     assert Summary.from_dict(legacy).semantic_verdict is None
 
 
+def test_coverage_verdict_round_trips_independent_of_semantic_verdict():
+    """Coverage (code->claim completeness) is a DISTINCT axis from faithfulness
+    (claim->code, `semantic_verdict`). Its external-judge verdict rides on its OWN
+    field, coexists with `semantic_verdict`, and round-trips through to/from_dict."""
+    faithful = {"verdict": "faithful", "judge": "ditto", "model": "judge-v1"}
+    coverage = {"verdict": "incomplete", "judge": "ditto", "model": "judge-v1",
+                "uncovered": ["pkg.Cls#other()"]}
+    s = Summary(
+        target_id="pkg.Cls#m()",
+        claims=(SummaryClaim(text="c", source_refs=("pkg.Cls#m()",)),),
+        generator="g", model="m", source_commit="deadbeef",
+        created_at="2026-07-01T00:00:00Z",
+        semantic_verdict=faithful,
+        coverage_verdict=coverage,
+    )
+    d = s.to_dict()
+    # Two independent axes, neither overloading the other.
+    assert d["coverage_verdict"] == coverage
+    assert d["semantic_verdict"] == faithful
+
+    back = Summary.from_dict(d)
+    assert back.coverage_verdict == coverage
+    assert back.semantic_verdict == faithful
+
+
+def test_coverage_verdict_absent_defaults_to_none_backward_compatible():
+    """A legacy payload without the field still loads (coverage_verdict -> None)."""
+    legacy = {
+        "target_id": "pkg.Cls#m()",
+        "claims": [{"text": "c", "source_refs": ["pkg.Cls#m()"]}],
+        "generator": "g", "model": "m", "source_commit": "deadbeef",
+        "created_at": "2026-07-01T00:00:00Z",
+    }
+    assert Summary.from_dict(legacy).coverage_verdict is None
+
+
 # --- provenance: freshness follows the code, not the generator's wall-clock ---
 
 

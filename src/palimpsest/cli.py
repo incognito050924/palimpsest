@@ -167,19 +167,29 @@ def _cmd_reconcile(args) -> int:
 
 def _semantic_annotations(semantic) -> list[str]:
     """Flatten the DISPLAY-ONLY inferred layer bound to a peer into terse
-    (verdict, confidence, source) lines. palimpsest generates none of it — this
-    only surfaces what an external judge already loaded. Author-omitted."""
+    (verdict, coverage, confidence, source) lines. palimpsest generates none of it —
+    this only surfaces what an external judge already loaded. Author-omitted.
+
+    ``coverage`` (the summaries-only code->claim completeness axis) rides alongside
+    the faithfulness ``verdict`` and is shown only when a coverage_verdict is present,
+    so a coverage-only entry still surfaces (guard below) without adding noise to the
+    other channels that never carry one."""
     lines = []
     for channel in ("summaries", "risks", "decisions", "relations"):
         for entry in semantic.get(channel, []):
             verdict = entry.get("semantic_verdict")
+            coverage = entry.get("coverage_verdict")  # summaries-only axis
             has_conf = entry.get("confidence") is not None
-            if verdict is None and not has_conf:
+            if verdict is None and coverage is None and not has_conf:
                 continue
             v = verdict.get("verdict") if isinstance(verdict, dict) else verdict
             src = entry.get("source_commit") or entry.get("code_bound_at")
+            cov = ""
+            if coverage is not None:
+                cv = coverage.get("verdict") if isinstance(coverage, dict) else coverage
+                cov = f" coverage={cv}"
             lines.append(
-                f"verdict={v} confidence={entry.get('confidence')} source={src}"
+                f"verdict={v}{cov} confidence={entry.get('confidence')} source={src}"
             )
     return lines
 

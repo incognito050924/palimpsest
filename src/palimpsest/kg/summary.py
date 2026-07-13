@@ -88,6 +88,7 @@ SET s.target_id     = $target_id,
     s.code_bound_at = $code_bound_at,
     s.confidence    = $confidence,
     s.semantic_verdict = $semantic_verdict,
+    s.coverage_verdict = $coverage_verdict,
     s.prompt        = $prompt,
     s.embedding     = $embedding,
     s.embedding_model = $embedding_model,
@@ -204,6 +205,13 @@ def _write(session, sid: str, s: Summary, endpoints: set[str], code_bound_at) ->
         if s.semantic_verdict is not None
         else None
     )
+    # Coverage verdict rides the same JSON-string channel as semantic_verdict — a
+    # separate, independent annotate-only axis (code->claim completeness).
+    coverage_verdict = (
+        json.dumps(s.coverage_verdict, ensure_ascii=False)
+        if s.coverage_verdict is not None
+        else None
+    )
     session.run(
         _SUMMARY_MERGE,
         id=sid,
@@ -216,6 +224,7 @@ def _write(session, sid: str, s: Summary, endpoints: set[str], code_bound_at) ->
         code_bound_at=code_bound_at,
         confidence=s.confidence,
         semantic_verdict=semantic_verdict,
+        coverage_verdict=coverage_verdict,
         prompt=s.prompt,
         embedding=s.embedding,
         embedding_model=s.embedding_model,
