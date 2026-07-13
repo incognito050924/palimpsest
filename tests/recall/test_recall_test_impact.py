@@ -50,7 +50,9 @@ WIDGET_RENDER = "app.Widget#render()"                       # production seed (i
 DIRECT_TEST = "app.WidgetDirectTest#rendersDirectly()"      # direct 1-hop test caller
 HELPER = "app.WidgetHelper#callWidget()"                     # helper (under src/test)
 INDIRECT_TEST = "app.WidgetIndirectTest#rendersIndirectly()"  # indirect via HELPER chain
-PROD_HELPER = "app.WidgetProdHelper#callWidget()"           # PRODUCTION intermediary (is_test None)
+PROD_HELPER = "app.WidgetProdHelper#callWidgetProd()"       # PRODUCTION intermediary (is_test None); method
+                                                            # name kept DISTINCT from WidgetHelper#callWidget so
+                                                            # name-based CALLS can't conflate the two helpers
 VIA_PROD_TEST = "app.WidgetViaProdTest#rendersViaProd()"    # test reaching seed THROUGH PROD_HELPER
 
 SOURCE_COMMIT = "c20b7332d8c60ce73794427a4c28120b085c134d"
@@ -204,7 +206,7 @@ def test_bfs_traverses_through_production_intermediary():
                                        never itself an answer.
     """
     graph = {
-        WIDGET_RENDER: [_caller_row(PROD_HELPER, "callWidget", is_test=False)],  # production intermediary
+        WIDGET_RENDER: [_caller_row(PROD_HELPER, "callWidgetProd", is_test=False)],  # production intermediary
         PROD_HELPER: [_caller_row(VIA_PROD_TEST, "rendersViaProd", is_test=True)],  # test via prod helper
     }
     drv = _FakeDriver(_resolve_row(WIDGET_RENDER), graph)
@@ -385,7 +387,7 @@ def test_live_only_is_test_callers_surface(test_impact_db):
     """The is_test partition holds over real records: every returned item is a test Method,
     and no PRODUCTION node leaks in — even a production intermediary (WidgetProdHelper) that
     the traversal walks THROUGH must stay out of ``items``. Widget#render() and
-    WidgetProdHelper#callWidget() are the two production Methods; neither may surface."""
+    WidgetProdHelper#callWidgetProd() are the two production Methods; neither may surface."""
     out = recall_test_impact(test_impact_db, WIDGET_RENDER)
     assert out["items"]
     ids = {it["id"] for it in out["items"]}

@@ -7,6 +7,6 @@ public class WidgetViaProdTest {
 	@Test
 	public void rendersViaProd() {
 		WidgetProdHelper helper = new WidgetProdHelper();
-		helper.callWidget();
+		helper.callWidgetProd();
 	}
 }
