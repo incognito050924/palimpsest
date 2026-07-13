@@ -1145,8 +1145,10 @@ LIMIT $lim
 # completeness is never claimed on this channel.
 _STATIC_LOWER_BOUND_GAP = (
     "static CALLS is a lower bound: reflective / DI / polymorphic-dispatch test "
-    "callers are invisible to it, so an empty or short result does NOT mean 'no tests "
-    "impacted' — completeness is not claimed"
+    "callers are invisible to it, AND at a tight limit production callers interleaved "
+    "in the id-ordered frontier can crowd out statically-visible test callers "
+    "(mechanical under-fill) — so an empty or short result does NOT mean 'no tests "
+    "impacted'; completeness is not claimed"
 )
 
 

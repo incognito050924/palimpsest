@@ -274,6 +274,17 @@ def test_static_lower_bound_gap_is_always_present_even_with_results():
     assert _STATIC_LOWER_BOUND_GAP in out["gaps"]  # yet the gap is still present
 
 
+def test_static_lower_bound_gap_names_mechanical_underfill():
+    """ac-3 honesty (reviewer finding 1): the lower-bound note enumerates not only the
+    semantic invisibles (reflective / DI / polymorphic dispatch) but also the MECHANICAL
+    under-fill — at a tight limit, production callers interleaved in the id-ordered
+    frontier can crowd out statically-VISIBLE test callers, so a short result is a lower
+    bound for that reason too. Both causes must be named, not just the semantic ones."""
+    assert "reflective" in _STATIC_LOWER_BOUND_GAP  # semantic invisibles still named
+    assert "under-fill" in _STATIC_LOWER_BOUND_GAP  # the mechanical cause is named too
+    assert "limit" in _STATIC_LOWER_BOUND_GAP        # tight-limit interleave is the trigger
+
+
 def test_zero_coverage_adds_distinct_reingest_advisory():
     """ac-3 honesty: when NO test caller is found, a DISTINCT re-ingest advisory is
     added so a graph predating the is_test marker is not read as 'no test callers'."""
