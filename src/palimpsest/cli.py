@@ -48,6 +48,7 @@ from palimpsest.backfill import backfill
 from palimpsest.extract import dispatch, read_provenance
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
+from palimpsest.kg.calls_api import load_calls_api
 from palimpsest.kg.summary import create_vector_index, summary_id
 from palimpsest.recall import (
     recall,
@@ -84,9 +85,18 @@ def _cmd_ingest(args) -> None:
     with _driver() as driver:
         create_constraints(driver)
         ingest(driver, ir)
+        # Post-ingest inferred layer: compute + MERGE the cross-tier CALLS_API edges
+        # (front-end ApiCall -> back-end/f-e Endpoint by canonical route). It queries
+        # the just-ingested deterministic nodes, so it runs AFTER ingest — via the
+        # dedicated inferred loader, never the generic edge writer (Frozen Invariant 3).
+        calls_api = load_calls_api(driver)
     print(
         f"ingested {len(ir.nodes)} nodes, {len(ir.edges)} edges "
         f"from {args.repo} @ {prov.source_commit}"
+    )
+    print(
+        f"linked {calls_api.loaded} CALLS_API cross-tier edge(s) "
+        f"({calls_api.api_calls} ApiCall x {calls_api.endpoints} Endpoint)"
     )
 
 

@@ -35,6 +35,7 @@ from palimpsest.ir import (
     ENDPOINT,
     LAYOUT,
     HOOK,
+    API_CALL,
     CONTAINS,
     IMPORTS,
     CALLS,
@@ -67,7 +68,7 @@ CAPTURE_MANIFEST = "CaptureManifest"
 NODE_LABELS = [
     REPO, PACKAGE, FILE, CLASS, METHOD, FUNCTION, VARIABLE, "Episode", SUMMARY,
     COMMUNITY, RISK, DESIGN_DECISION, CAPTURE_MANIFEST,
-    ROUTE, ENDPOINT, LAYOUT, HOOK,
+    ROUTE, ENDPOINT, LAYOUT, HOOK, API_CALL,
 ]
 # MODIFIES is a deterministic rel type, but it is written by a DEDICATED loader
 # (``ingest_modifies``), never the generic ``_REL_MERGE`` path: its src is a bare
@@ -92,6 +93,7 @@ SET n.name          = row.name,
     n.end_line      = row.end_line,
     n.is_test       = row.is_test,
     n.server_only   = row.server_only,
+    n.role          = row.role,
     n.source_commit = row.source_commit,
     n.author        = row.author,
     n.committed_at  = row.committed_at,
@@ -236,6 +238,9 @@ def _node_row(node) -> dict:
         # SvelteKit routing server-only marker; null for non-routing nodes ->
         # Neo4j drops the property (additive, never a phantom-false).
         "server_only": node.server_only,
+        # Spring DI/stereotype role (Decision 6); null for non-Class / unmarked
+        # nodes -> Neo4j drops the property (additive, mirrors server_only).
+        "role": node.role,
         "source_commit": p.source_commit,
         "author": p.author,
         "committed_at": p.committed_at,

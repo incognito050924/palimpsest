@@ -20,6 +20,7 @@ The structure is plain dataclasses; ``to_dict()`` yields dict/JSON-serializable 
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from typing import Optional
 
@@ -41,6 +42,137 @@ def branch_scoped_id(branch: Optional[str], qualified_name: str) -> str:
     if branch is None:
         return qualified_name
     return f"branch:{branch}{_BRANCH_US}{qualified_name}"
+
+
+# ---------------------------------------------------------------------------
+# Canonical HTTP route functions (Decisions 2 & 3 of the API-semantics contract).
+# Pure, and shared by BOTH the extractors (extract/*) and the cross-tier matcher
+# (kg/calls_api.py) — the ``branch_scoped_id`` precedent: one identity fn imported
+# both ways, so route identity and route matching can never drift apart.
+#
+# TWO normalization LEVELS, deliberately NOT conflated:
+#   * IDENTITY level (``normalize_endpoint_path``) PRESERVES native param names —
+#     erasing them in identity would collapse sibling routes into one node.
+#   * MATCH level (``canonical_route_path``) erases param names to "{}" / "{**}" so
+#     a caller's ApiCall and a server's Endpoint compare equal across tiers.
+# ---------------------------------------------------------------------------
+
+# Method sentinel for a method-less mapping (@RequestMapping without a method): the
+# route answers ANY verb. The matcher treats it (and SvelteKit's "fallback") as a
+# wildcard method with reduced confidence (Decision 2e).
+ANY_METHOD = "*"
+
+# A template-literal interpolation (``${...}``) inside a URL literal — collapses to
+# the single-segment placeholder when building an ApiCall route (Decision 3).
+_URL_INTERPOLATION = re.compile(r"\$\{[^}]*\}")
+
+
+def normalize_endpoint_path(raw_path: str) -> str:
+    """IDENTITY-level path normalization (Decision 2a) — PRESERVES param names.
+
+    Single leading ``/``, collapse repeated ``//``, strip a trailing ``/`` (except
+    root). Native param syntax ({id}, {id:[0-9]+}, [slug], [id=int]) is preserved
+    verbatim: it is part of a route's IDENTITY, so erasing it here would collapse
+    distinct sibling routes into one node. Empty input -> root ``/``.
+    """
+    segments = [s for s in raw_path.split("/") if s != ""]
+    if not segments:
+        return "/"
+    return "/" + "/".join(segments)
+
+
+def _canonical_segment(seg: str) -> str:
+    """Reduce ONE path segment to its match-level form (helper for
+    :func:`canonical_route_path`)."""
+    # Already-canonical forms first -> idempotence (they are the fixed points).
+    if seg == "{**}":
+        return "{**}"
+    if seg == "{}":
+        return "{}"
+    # Rest / catch-all forms -> "{**}"  (SvelteKit [...rest] / [[...rest]],
+    # Ant-style **, Spring 6 {*name}).
+    if (
+        (seg.startswith("[[...") and seg.endswith("]]"))
+        or (seg.startswith("[...") and seg.endswith("]"))
+        or (seg == "**")
+        or (seg.startswith("{*") and seg.endswith("}"))
+    ):
+        return "{**}"
+    # Single-variable forms -> "{}"  (SvelteKit [id]/[id=int], optional [[opt]],
+    # brace {id}/{id:regex}, Express/Spring :id, template ${...}).
+    if (
+        (seg.startswith("[[") and seg.endswith("]]"))
+        or (seg.startswith("[") and seg.endswith("]"))
+        or (seg.startswith("${") and seg.endswith("}"))
+        or (seg.startswith("{") and seg.endswith("}"))
+        or seg.startswith(":")
+    ):
+        return "{}"
+    # Literal segment — unchanged, case-sensitive.
+    return seg
+
+
+def canonical_route_path(path: str) -> str:
+    """MATCH-level path canonicalization (Decision 2b), idempotent.
+
+    Per ``/`` segment: any single path variable ([id], [id=m], {id}, {id:regex},
+    :id, ${...}, {}, optional [[opt]]) -> "{}"; any rest/catch-all ([...rest], **,
+    {*x}, {**}) -> "{**}"; a literal segment is unchanged (case-sensitive). The
+    placeholders "{}" / "{**}" are fixed points, so applying it twice yields the
+    same string (a route already at match level is stable).
+    """
+    segments = [s for s in path.split("/") if s != ""]
+    if not segments:
+        return "/"
+    return "/" + "/".join(_canonical_segment(s) for s in segments)
+
+
+def canonical_match_key(qualified_name: str) -> tuple[str, str]:
+    """The cross-tier matcher's ONLY entry point (Decision 2b).
+
+    Strips an optional ``<ns>:`` namespace prefix (only when the ``:`` occurs
+    BEFORE the first space, so a ``:`` inside a path/regex param is untouched),
+    splits the remainder into ``method`` and ``path``, and returns
+    ``(method, canonical_route_path(path))``. So "GET /api/users/[id]",
+    "spring:GET /api/users/{userId}" and "apicall:GET /api/users/{}" all reduce to
+    ``("GET", "/api/users/{}")``.
+    """
+    s = qualified_name
+    space = s.find(" ")
+    colon = s.find(":")
+    if colon != -1 and (space == -1 or colon < space):
+        s = s[colon + 1:]
+    method, _, path = s.partition(" ")
+    return (method, canonical_route_path(path))
+
+
+def api_call_qualified_name(method: str, raw_url: str) -> Optional[str]:
+    """Build an :data:`API_CALL` node identity from a call-site URL (Decision 3).
+
+    Returns ``f"apicall:{method} {path}"`` where ``path`` is the STATIC template of
+    the URL with each template-literal interpolation (``${...}``) collapsed to
+    ``{}`` — e.g. ("GET", "`/api/orders/${id}`") -> "apicall:GET /api/orders/{}".
+
+    Returns ``None`` (the ApiCall is NOT emitted) when the URL is a non-templatable
+    dynamic value: a bare variable or a runtime concatenation (no enclosing
+    string/template literal), or a literal that has NO static segment at all
+    (purely an interpolation). This is the ac-6 disclosed gap — an unresolvable URL
+    is an honest absence, never a false "endpoint unused".
+    """
+    text = raw_url.strip()
+    # A string or template literal is templatable; a bare variable / runtime
+    # concat (no matching enclosing quote) is a dynamic URL -> disclosed gap.
+    if len(text) >= 2 and text[0] in "\"'`" and text[-1] == text[0]:
+        inner = text[1:-1]
+    else:
+        return None
+    templated = normalize_endpoint_path(_URL_INTERPOLATION.sub("{}", inner))
+    # A literal that reduces to only placeholders (e.g. `${url}`) is a dressed-up
+    # bare variable — no static route to match on -> disclosed gap.
+    if not any(seg not in ("{}", "{**}") for seg in templated.split("/") if seg):
+        return None
+    return f"apicall:{method} {templated}"
+
 
 # Node kinds
 REPO = "Repo"
@@ -65,6 +197,12 @@ ROUTE = "Route"
 ENDPOINT = "Endpoint"
 LAYOUT = "Layout"
 HOOK = "Hook"
+# HTTP-API call-site node (deterministic structural): a recognized outbound HTTP
+# call (fetch / axios / RestTemplate / ...) whose identity is its
+# "apicall:{method} {path}" route template. The cross-tier peer of an Endpoint — a
+# front-end ApiCall is later matched to a back-end Endpoint by a dedicated inferred
+# CALLS_API loader.
+API_CALL = "ApiCall"
 
 # Edge kinds (deterministic structural ontology)
 CONTAINS = "CONTAINS"
@@ -113,6 +251,14 @@ DESIGN_DECISION = "DesignDecision"    # node label
 DECIDES = "DECIDES"                   # edge type (DesignDecision -> code | DesignDecision)
 SUPERSEDES = "SUPERSEDES"            # edge type (DesignDecision -> DesignDecision)
 ADDRESSES_RISK = "ADDRESSES_RISK"    # edge type (DesignDecision -> Risk)
+
+# Inferred cross-tier edge (dedicated loader, SUMMARIZES/RISKS/DECIDES precedent):
+# a front-end ApiCall CALLS_API a back-end Endpoint when their canonical routes
+# match. DELIBERATELY absent from ``REL_TYPES`` (Frozen Invariant 3) so the generic
+# deterministic writer can never stamp it; ``kg/calls_api.py`` is the ONLY producer
+# and writes it with ``edge_kind='inferred'``. The ingest fail-closed guard rejects
+# an accidental CALLS_API in ``ir.edges``, forcing use of that dedicated loader.
+CALLS_API = "CALLS_API"    # edge type (ApiCall -> Endpoint), inferred
 
 # Inferred GENERIC relations between two EXISTING entities (no new node): an
 # external generator asserts a relation; palimpsest loads it grounded (both
@@ -180,6 +326,12 @@ class Node:
     # PROPERTY — deliberately OFF ``id``/``branch_scoped_id`` so it never perturbs
     # node identity; ``scope_to_branch``'s ``replace`` preserves it.
     server_only: Optional[bool] = None
+    # DI / stereotype role marker (Decision 6): the Spring stereotype a Class plays
+    # ("controller" / "repository" / "service" / "component"), else None. Like
+    # ``is_test`` / ``server_only`` a pure PROPERTY — deliberately OFF
+    # ``id``/``branch_scoped_id`` so it never perturbs node identity;
+    # ``scope_to_branch``'s ``replace`` preserves it.
+    role: Optional[str] = None
 
     @property
     def id(self) -> str:
@@ -195,6 +347,7 @@ class Node:
             "end_line": self.end_line,
             "is_test": self.is_test,
             "server_only": self.server_only,
+            "role": self.role,
             "provenance": self.provenance.to_dict(),
         }
 

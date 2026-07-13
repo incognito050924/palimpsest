@@ -30,3 +30,18 @@
 (call_expression function: (identifier) @reference.call.name) @reference.call
 (call_expression
   function: (member_expression property: (property_identifier) @reference.call.name)) @reference.call
+
+; HTTP call sites — recognized-origin outbound calls that become ApiCall nodes.
+; The base receiver (`axios` / `fetch`) is resolved against the file's import
+; bindings by the walker (Frozen Invariant 5: HTTP-ness keys off the import origin,
+; NOT the call syntax). Two shapes: a member call `base.verb(url, …)` (the axios
+; verb form) and a bare call `fetch(url, …)` / `axios(url, …)`. `@…base` names the
+; receiver in BOTH; `@…verb` is present only for the member form.
+(call_expression
+  function: (member_expression
+    object: (identifier) @reference.http.base
+    property: (property_identifier) @reference.http.verb)
+  arguments: (arguments) @reference.http.args) @reference.http.call
+(call_expression
+  function: (identifier) @reference.http.base
+  arguments: (arguments) @reference.http.args) @reference.http.call

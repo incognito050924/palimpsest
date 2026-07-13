@@ -15,8 +15,9 @@ import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser, Query, QueryCursor, Node as TSNode
 
 from palimpsest.ir import IR, Node, Edge, Provenance
-from palimpsest.ir import REPO, PACKAGE, FILE, CLASS, METHOD
-from palimpsest.ir import CONTAINS, IMPORTS, CALLS, DEPENDS_ON
+from palimpsest.ir import REPO, PACKAGE, FILE, CLASS, METHOD, ENDPOINT
+from palimpsest.ir import CONTAINS, IMPORTS, CALLS, DEPENDS_ON, REALIZES, HANDLES
+from palimpsest.extract.spring import AnnotationInfo, spring_role, spring_endpoints
 
 _TYPE_DECLS = ("class_declaration", "interface_declaration", "enum_declaration", "record_declaration")
 _METHOD_DECLS = ("method_declaration", "constructor_declaration")
@@ -134,18 +135,76 @@ def _is_junit_import(target: str) -> bool:
     return target.startswith("org.junit") or target.startswith("junit.")
 
 
-def _has_test_annotation(decl_node: TSNode) -> bool:
-    """True if a class/method declaration carries an ``@Test`` annotation (bare
-    ``@Test``, ``@Test(...)``, or fully-qualified ``@org.junit.Test``)."""
+def _string_literal_value(node: TSNode) -> str | None:
+    """Inner text of a ``string_literal`` node (quotes stripped), else None."""
+    if node.type != "string_literal":
+        return None
+    text = node.text.decode()
+    return text[1:-1] if len(text) >= 2 else ""
+
+
+def _flatten_string_literals(node: TSNode) -> list[str]:
+    """String-literal values of a positional annotation argument — a bare literal, or
+    every literal inside a ``{...}`` array (``@GetMapping({"/a","/b"})``). Non-literals
+    are dropped."""
+    lit = _string_literal_value(node)
+    if lit is not None:
+        return [lit]
+    if node.type == "array_initializer":
+        out: list[str] = []
+        for child in node.named_children:
+            out.extend(_flatten_string_literals(child))
+        return out
+    return []
+
+
+def _annotation_info(ann: TSNode) -> AnnotationInfo | None:
+    """Read one ``marker_annotation``/``annotation`` node into an :class:`AnnotationInfo`
+    (simple name; positional string-literal args; named ``key=value`` value texts —
+    string literals unquoted, other value expressions kept verbatim)."""
+    if ann.type not in ("marker_annotation", "annotation"):
+        return None
+    name_node = ann.child_by_field_name("name")
+    if name_node is None:
+        return None
+    name = name_node.text.decode().split(".")[-1]  # simple name (@a.b.Controller -> Controller)
+    args: list[str] = []
+    named: dict[str, str] = {}
+    arglist = ann.child_by_field_name("arguments")
+    if arglist is not None:
+        for arg in arglist.named_children:
+            if arg.type == "element_value_pair":
+                key = arg.child_by_field_name("key")
+                val = arg.child_by_field_name("value")
+                if key is not None and val is not None:
+                    lit = _string_literal_value(val)
+                    named[key.text.decode()] = lit if lit is not None else val.text.decode()
+            else:
+                args.extend(_flatten_string_literals(arg))
+    return AnnotationInfo(name=name, args=tuple(args), named_args=named)
+
+
+def _annotations(decl_node: TSNode) -> list[AnnotationInfo]:
+    """Every annotation on a class/method declaration's ``modifiers`` (the grammar-
+    specific reader that feeds the shared ``spring`` mapper). Java places method
+    return-type annotations (e.g. ``@ResponseBody`` in ``public @ResponseBody Map m()``)
+    in ``modifiers`` too, so a legacy hybrid handler is captured here."""
+    out: list[AnnotationInfo] = []
     for child in decl_node.named_children:
         if child.type != "modifiers":
             continue
         for ann in child.named_children:
-            if ann.type in ("marker_annotation", "annotation"):
-                name = ann.child_by_field_name("name")
-                if name is not None and name.text.decode().split(".")[-1] == "Test":
-                    return True
-    return False
+            info = _annotation_info(ann)
+            if info is not None:
+                out.append(info)
+    return out
+
+
+def _has_test(anns: list[AnnotationInfo]) -> bool:
+    """True if a declaration carries an ``@Test`` annotation (bare ``@Test``,
+    ``@Test(...)``, or fully-qualified ``@org.junit.Test`` — all reduced to the simple
+    name ``Test``)."""
+    return any(a.name == "Test" for a in anns)
 
 
 class _FileWalker:
@@ -226,7 +285,8 @@ class _FileWalker:
         if name_node is None:
             return
         name = name_node.text.decode()
-        if _has_test_annotation(node):
+        class_anns = _annotations(node)
+        if _has_test(class_anns):
             self.has_test_annotation = True
         if enclosing_fqn:
             fqn = f"{enclosing_fqn}.{name}"
@@ -243,6 +303,9 @@ class _FileWalker:
                 path=self.rel_path,
                 start_line=_line(node.start_point),
                 end_line=_line(node.end_point),
+                # Spring DI/stereotype role marker (design contract Decision 6): a pure
+                # property off identity; None when the class carries no stereotype.
+                role=spring_role(class_anns),
             )
         )
         # container (File or enclosing Class) CONTAINS this Class
@@ -257,7 +320,7 @@ class _FileWalker:
         self.class_bodies[fqn] = body
         for member in body.named_children:
             if member.type in _METHOD_DECLS:
-                self._method_decl(member, class_fqn=fqn)
+                self._method_decl(member, class_fqn=fqn, class_anns=class_anns)
             elif member.type in _TYPE_DECLS:
                 self._type_decl(member, enclosing_fqn=fqn, container_id=fqn)
             elif member.type == "field_declaration":
@@ -265,17 +328,21 @@ class _FileWalker:
                 if ref:
                     self.class_refs[fqn].add(ref)
 
-    def _method_decl(self, node: TSNode, class_fqn: str) -> None:
+    def _method_decl(
+        self, node: TSNode, class_fqn: str, class_anns: list[AnnotationInfo]
+    ) -> None:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return
         name = name_node.text.decode()
-        if _has_test_annotation(node):
+        method_anns = _annotations(node)
+        if _has_test(method_anns):
             self.has_test_annotation = True
         param_type_names = _param_types(node)
         params = ",".join(param_type_names)
         fqn = f"{class_fqn}#{name}({params})"
-        # parameter types are dependencies of the declaring class
+        # parameter types are dependencies of the declaring class (constructor-injection
+        # params flow here too, so injected deps reach DEPENDS_ON — no new edge, ac-9)
         for ref in param_type_names:
             if ref and ref != "?":
                 self.class_refs.setdefault(class_fqn, set()).add(ref)
@@ -291,6 +358,25 @@ class _FileWalker:
             )
         )
         self._edge(CONTAINS, class_fqn, fqn)
+        # Spring HTTP-API Endpoints (design contract Decisions 1 & 2): a controller
+        # handler method realizes one or more Endpoints whose identity is the
+        # ``spring:``-discriminated normalized route. Bind the File that REALIZES the
+        # Endpoint and the handler Method that HANDLES it (SvelteKit routing-edge
+        # precedent). A non-controller / view-returning method yields [].
+        for method_token, ep_qn in spring_endpoints(class_anns, method_anns):
+            self.nodes.append(
+                Node(
+                    kind=ENDPOINT,
+                    qualified_name=ep_qn,
+                    name=method_token,
+                    provenance=self.prov,
+                    path=self.rel_path,
+                    start_line=_line(node.start_point),
+                    end_line=_line(node.end_point),
+                )
+            )
+            self._edge(REALIZES, self.rel_path, ep_qn)
+            self._edge(HANDLES, fqn, ep_qn)
 
 
 # A resolved call site: (rel_path, call_line, method_name, receiver_kind, receiver_value).

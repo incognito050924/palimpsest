@@ -38,28 +38,47 @@ from palimpsest.recall.graphrag import _result, _item, _resolve
 
 # ── ac-4: unguarded endpoints (statically-detected-guard lower bound) ─────────
 
+# The tier discriminator: a back-end (Spring) Endpoint carries this namespace token on
+# its ``qualified_name`` (``spring:GET /api/x``), while a SvelteKit f/e Endpoint is
+# prefix-less (``GET /api/x`` — Frozen Invariant 1). This channel is a SvelteKit
+# colocation-plane keystone; the ``spring:`` plane is excluded from it (see below). A
+# named constant, not a magic literal — and passed as a query PARAMETER, never
+# interpolated into Cypher.
+_SPRING_NS_PREFIX = "spring:"
+
 # ALWAYS emitted (ac-4 honesty): a missing incoming GUARDS edge is a LOWER BOUND on
 # "protected". Static extraction only sees a server Layout (+layout.server) guarding a
 # descendant page Route or a server Hook (hooks.server) guarding every Endpoint/Route —
 # it CANNOT see a runtime guard (hooks.server handle logic, a load() redirect, a
 # session/locals check inside the handler). So an endpoint with no GUARDS edge is "no
 # statically-detected guard", NEVER a definitive "unprotected/public" verdict —
-# completeness is not claimed.
+# completeness is not claimed. The second clause discloses the b/e tier exclusion: a
+# back-end (spring:) Endpoint's authorization mechanism is out of static-extraction
+# scope, so it is EXCLUDED from this SvelteKit channel rather than surfaced with a
+# SvelteKit-shaped (wrong-mechanism) "unguarded" verdict.
 _UNGUARDED_STATIC_LOWER_BOUND_GAP = (
     "a missing incoming GUARDS edge is a STATIC lower bound: it means no "
     "statically-detected guard (a server Layout / server Hook), NOT that the endpoint "
     "is unprotected — a runtime guard (hooks.server handle logic, a load() redirect, a "
     "session/locals check inside the handler) is invisible to static extraction and may "
-    "still protect it; completeness is not claimed"
+    "still protect it; completeness is not claimed. This channel is scoped to the "
+    "SvelteKit colocation plane (prefix-less Endpoint ids): back-end (spring:) Endpoints "
+    "are EXCLUDED because their guard mechanism — Spring Security / @PreAuthorize / the "
+    "servlet filter chain — is invisible to static extraction, so a Spring-guarded "
+    "endpoint is never silently reported here as unguarded with the wrong mechanism"
 )
 
-# Endpoints with NO incoming GUARDS edge. The absence is checked with a pattern
-# predicate (NOT (ep)<-[:GUARDS]-()) — the endpoint's own null-guard set, id-ordered
+# Endpoints with NO incoming GUARDS edge, SCOPED to the SvelteKit colocation plane. The
+# guard absence is checked with a pattern predicate (NOT (ep)<-[:GUARDS]-()) — the
+# endpoint's own null-guard set; the tier filter (qualified_name NOT STARTS WITH the
+# spring: namespace token) drops back-end endpoints, which share the Endpoint label but
+# have no static GUARDS producer, so they never pollute this f/e keystone. id-ordered
 # before LIMIT for rebuild-determinism. A whole node is never projected (author-omitted
 # — mirrors graphrag): only the grounding properties surface via _item/_sources.
 _UNGUARDED_ENDPOINTS = """
 MATCH (ep:Endpoint)
 WHERE NOT (ep)<-[:GUARDS]-()
+  AND NOT ep.qualified_name STARTS WITH $spring_ns
 RETURN ep.id AS id, labels(ep) AS labels, ep.name AS name,
        ep.qualified_name AS qualified_name,
        ep.path AS path, ep.start_line AS start_line, ep.end_line AS end_line,
@@ -70,19 +89,28 @@ LIMIT $lim
 
 
 def recall_unguarded_endpoints(driver, limit=25):
-    """Recall Endpoints with NO statically-detected guard (ac-4).
+    """Recall SvelteKit Endpoints with NO statically-detected guard (ac-4).
 
-    A SEPARATE, read-only, global entry point: every ``Endpoint`` node carrying no
-    incoming ``GUARDS`` edge, id-ordered and BOUNDED by ``limit``. Returns the standard
+    A SEPARATE, read-only entry point over the SvelteKit colocation plane: every
+    prefix-less ``Endpoint`` node carrying no incoming ``GUARDS`` edge, id-ordered and
+    BOUNDED by ``limit``. Back-end (``spring:``) Endpoints share the ``Endpoint`` label
+    but have no static GUARDS producer (Spring Security is out of scope), so they are
+    tier-scoped OUT rather than flooding this f/e keystone. Returns the standard
     ``{items, sources, ...}`` shape; each item is a grounded Endpoint (author-omitted).
 
     Soundness (ac-4): the result ALWAYS carries the lower-bound disclosure in ``gaps`` —
     a missing GUARDS edge is "no statically-detected guard", never a definitive
-    "unprotected" verdict (a runtime guard may still exist). Combinatorial only.
+    "unprotected" verdict (a runtime guard may still exist) — and that disclosure also
+    names the b/e tier exclusion (Spring guards are static-invisible). Combinatorial only.
     """
     gaps = [_UNGUARDED_STATIC_LOWER_BOUND_GAP]
     with driver.session() as session:
-        rows = [r.data() for r in session.run(_UNGUARDED_ENDPOINTS, lim=limit)]
+        rows = [
+            r.data()
+            for r in session.run(
+                _UNGUARDED_ENDPOINTS, lim=limit, spring_ns=_SPRING_NS_PREFIX
+            )
+        ]
     items = [_item(rec, None, 1) for rec in rows]
     return _result(items, gaps, None, [])
 

@@ -27,6 +27,7 @@ from palimpsest.extract.svelte import (
 )
 from palimpsest.extract.ecmascript import extract_fragment, finalize_ir
 from palimpsest.extract.sveltekit import extract_sveltekit_routes
+from palimpsest.extract.calls_api import CallEndpointMatch, RouteEnd, match_calls
 from palimpsest.extract.provenance import changed_paths, read_provenance
 
 # Backward-compatible default: `extract` remains the Java extractor.
@@ -160,6 +161,9 @@ __all__ = [
     "extract_ecmascript",
     "dispatch",
     "EXTRACTORS_BY_EXT",
+    "match_calls",
+    "CallEndpointMatch",
+    "RouteEnd",
     "read_provenance",
     "changed_paths",
 ]

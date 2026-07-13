@@ -1,9 +1,12 @@
 # ADR-20260713-sveltekit-routing-ontology — SvelteKit 라우팅 온톨로지: 프레임워크-특정 1급 노드/엣지 + §4-3 override + 콜로케이션(제3의 cross-language 다리, SC-B와 직교)
 
 - 식별자: `ADR-20260713-sveltekit-routing-ontology` (파일명 = 불변 식별자)
-- 상태: active
+- 상태: superseded
+- 대체(superseded-by): `ADR-20260713-endpoint-framework-neutral-generalization`
 - 날짜: 2026-07-13
 - work item: wi_260713ruv (issue #20 — 다언어 온톨로지: Svelte/SvelteKit 라우팅·프레임워크 시맨틱)
+
+> **SUPERSEDED (2026-07-13, wi_260713c7t).** 결정 1의 change_condition("두 번째 파일-라우팅/endpoint-producing 프레임워크가 등장하면 framework-neutral 일반화를 재검토")이 **Spring 도입으로 충족**되어, `ADR-20260713-endpoint-framework-neutral-generalization`이 이 ADR을 supersede한다. 일반화 후에도 아래 프레임워크-특정 노드/엣지(`Route`/`Endpoint`/`Layout`/`Hook`, `REALIZES`/`HANDLES`/`LOADS`/`GUARDS`)와 lower-bound 정직성은 **폐기가 아니라 계승**된다(SvelteKit plane은 byte 불변, 접두 없는 grandfathered id; `GUARDS` lower-bound는 `recall/routing.py` tier-scoping으로 유지). history 보존을 위해 원문은 그대로 둔다.
 
 ## 맥락
 

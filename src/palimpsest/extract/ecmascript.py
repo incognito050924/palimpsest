@@ -33,8 +33,10 @@ from dataclasses import dataclass
 from tree_sitter import Language, Parser, Query, QueryCursor, Node as TSNode
 
 from palimpsest.ir import IR, Node, Edge, Provenance
-from palimpsest.ir import REPO, FILE, CLASS, METHOD, FUNCTION
+from palimpsest.ir import REPO, FILE, CLASS, METHOD, FUNCTION, API_CALL
 from palimpsest.ir import CONTAINS, IMPORTS, CALLS, DEPENDS_ON
+from palimpsest.ir import api_call_qualified_name
+from palimpsest.extract.http_origins import is_recognized_call
 
 # The shared per-family tags query (ADR-20260706 §결정6). Compiled once per grammar.
 _QUERY_DIR = Path(__file__).parent / "queries" / "ecmascript"
@@ -111,6 +113,99 @@ def _param_types(func: TSNode) -> list[str]:
     return out
 
 
+def _first_arg(args: TSNode) -> TSNode | None:
+    """The first positional argument expression of an ``arguments`` node, or None."""
+    for c in args.named_children:
+        return c
+    return None
+
+
+def _object_string_prop(obj: TSNode, key: str) -> str | None:
+    """Value of ``obj``'s ``key`` property when it is a plain string literal, else None
+    (e.g. the ``method: 'POST'`` of a ``fetch`` options object)."""
+    for pair in obj.named_children:
+        if pair.type != "pair":
+            continue
+        k = pair.child_by_field_name("key")
+        v = pair.child_by_field_name("value")
+        if k is not None and v is not None and k.text.decode() == key and v.type == "string":
+            return v.text.decode()[1:-1]
+    return None
+
+
+def _fetch_method_and_url(args: TSNode) -> tuple[str, TSNode | None]:
+    """``(method, url_arg)`` for a ``fetch``/``axios(url, opts)`` call.
+
+    The URL is the first argument; the method is the ``method`` string of a second
+    object argument (``{ method: 'POST' }``), defaulting to GET (the fetch default).
+    """
+    positional = args.named_children
+    url_arg = positional[0] if positional else None
+    method = "GET"
+    if len(positional) >= 2 and positional[1].type == "object":
+        m = _object_string_prop(positional[1], "method")
+        if m:
+            method = m.upper()
+    return method, url_arg
+
+
+def _literal_inner(node: TSNode) -> str | None:
+    """Inner text of a string/template literal (quotes/backticks stripped), keeping a
+    template's ``${…}`` interpolations verbatim; None for a non-literal operand."""
+    if node.type in ("string", "template_string"):
+        return node.text.decode()[1:-1]
+    return None
+
+
+def _concat_operands(node: TSNode) -> list[TSNode] | None:
+    """Left-to-right operands of a ``+`` concatenation (flattening the left-associative
+    ``a + b + c`` chain), or None when ``node`` is not a ``+`` binary expression."""
+    op = node.child_by_field_name("operator")
+    if op is None or op.text.decode() != "+":
+        return None
+    left = node.child_by_field_name("left")
+    right = node.child_by_field_name("right")
+    operands: list[TSNode] = []
+    if left is not None:
+        sub = _concat_operands(left) if left.type == "binary_expression" else None
+        operands.extend(sub if sub is not None else [left])
+    if right is not None:
+        operands.append(right)
+    return operands
+
+
+def _url_literal(arg: TSNode | None) -> str | None:
+    """A raw URL string for ``api_call_qualified_name``, or None for a dynamic URL.
+
+    A plain string / template literal is returned as-is (its own quotes/backticks let
+    ``api_call_qualified_name`` template it). A ``+`` concatenation is rebuilt into a
+    template literal — literal operands contribute their text, dynamic operands
+    ``${_}`` — but ONLY when it carries at least one literal segment; a literal-free
+    concat (``base + path``) and a bare variable are dynamic and return None (ac-6).
+    """
+    if arg is None:
+        return None
+    if arg.type in ("string", "template_string"):
+        return arg.text.decode()
+    if arg.type == "binary_expression":
+        operands = _concat_operands(arg)
+        if operands is None:
+            return None
+        parts: list[str] = []
+        has_literal = False
+        for op in operands:
+            inner = _literal_inner(op)
+            if inner is None:
+                parts.append("${_}")
+            else:
+                parts.append(inner)
+                has_literal = True
+        if not has_literal:
+            return None
+        return "`" + "".join(parts) + "`"
+    return None
+
+
 class _EcmaWalker:
     """Collects structural nodes + CONTAINS/IMPORTS edges for one parsed source.
 
@@ -140,6 +235,13 @@ class _EcmaWalker:
         # container fqn -> referenced simple type names (fields + params). Only
         # populated when ``profile.collect_types`` — the DEPENDS_ON source (n6, ac-4).
         self.type_refs: dict[str, set[str]] = defaultdict(set)
+        # imported local NAME -> its raw import specifier (``axios`` -> ``axios``,
+        # ``api`` -> ``./client``). Populated during the top-level pass; consumed by
+        # HTTP recognition to resolve a call's callee ORIGIN (Frozen Invariant 5).
+        self.local_imports: dict[str, str] = {}
+        # ApiCall qualified_names already emitted in THIS file — same (method,path)
+        # dedupes to one node (Decision 3).
+        self._seen_api: set[str] = set()
 
     def _line(self, point) -> int:
         return point[0] + 1 + self.line_offset
@@ -166,6 +268,10 @@ class _EcmaWalker:
             )
         for child in self.root.named_children:
             self._top_level(child)
+        # HTTP recognition runs AFTER the top-level pass so every import binding is
+        # already in ``self.local_imports`` (a call's callee origin resolves against
+        # the whole file's imports, wherever the call sits).
+        self._scan_http_calls()
 
     def _top_level(self, node: TSNode) -> None:
         t = node.type
@@ -182,11 +288,42 @@ class _EcmaWalker:
                 spec = self._string_value(src_node)
                 if spec:
                     self._edge(IMPORTS, self.rel_path, spec)
+                    # Only an `import` binds usable LOCAL callee names; a re-export
+                    # (`export … from`) does not introduce a local value.
+                    if t == "import_statement":
+                        self._bind_imports(node, spec)
             # `export function/class/const …` — unwrap the inner declaration.
             if t == "export_statement":
                 for c in node.named_children:
                     if c.type in ("function_declaration", "class_declaration", "lexical_declaration"):
                         self._top_level(c)
+
+    def _bind_imports(self, stmt: TSNode, spec: str) -> None:
+        """Bind each imported LOCAL name of ``stmt`` to its specifier ``spec``.
+
+        Covers the three binding forms so a later call can resolve its callee's
+        origin: default (``import axios from 'axios'``), namespace
+        (``import * as http from 'node-fetch'``) and named, honoring aliases
+        (``import { get as g } from 'axios'`` binds ``g``). Type-only imports bind
+        no callable value but are harmless to record.
+        """
+        clause = next((c for c in stmt.named_children if c.type == "import_clause"), None)
+        if clause is None:
+            return
+        for c in clause.named_children:
+            if c.type == "identifier":  # default import
+                self.local_imports[c.text.decode()] = spec
+            elif c.type == "namespace_import":  # `* as name`
+                for n in c.named_children:
+                    if n.type == "identifier":
+                        self.local_imports[n.text.decode()] = spec
+            elif c.type == "named_imports":  # `{ a, b as c }`
+                for isp in c.named_children:
+                    if isp.type != "import_specifier":
+                        continue
+                    local = isp.child_by_field_name("alias") or isp.child_by_field_name("name")
+                    if local is not None:
+                        self.local_imports[local.text.decode()] = spec
 
     @staticmethod
     def _string_value(string_node: TSNode) -> str | None:
@@ -194,6 +331,51 @@ class _EcmaWalker:
             if c.type == "string_fragment":
                 return c.text.decode()
         return None
+
+    def _scan_http_calls(self) -> None:
+        """Emit an ApiCall node for every recognized outbound-HTTP call in the file.
+
+        Recognition keys off the callee's resolved import ORIGIN (Frozen Invariant 5,
+        ``http_origins.is_recognized_call``), never the call syntax. A recognized
+        member call ``base.verb(url, …)`` takes its method from the verb; a bare
+        ``fetch(url, opts)`` from the ``method`` option (default GET). The identity is
+        ``api_call_qualified_name(method, url)`` — emitting NOTHING when the URL is a
+        non-templatable dynamic value (ac-6 disclosed gap).
+        """
+        for _pat, caps in QueryCursor(_tags_query(self.profile)).matches(self.root):
+            call = caps.get("reference.http.call")
+            base_cap = caps.get("reference.http.base")
+            args_cap = caps.get("reference.http.args")
+            if not call or not base_cap or not args_cap:
+                continue
+            base = base_cap[0].text.decode()
+            if not is_recognized_call(base, self.local_imports.get(base)):
+                continue
+            verb_cap = caps.get("reference.http.verb")
+            args = args_cap[0]
+            if verb_cap:  # member call `base.verb(url, …)` — method is the verb
+                method = verb_cap[0].text.decode().upper()
+                url_arg = _first_arg(args)
+            else:  # bare call `fetch(url, opts)` / `axios(url, opts)`
+                method, url_arg = _fetch_method_and_url(args)
+            raw_url = _url_literal(url_arg)
+            if raw_url is None:
+                continue
+            qn = api_call_qualified_name(method, raw_url)
+            if qn is None or qn in self._seen_api:
+                continue  # dynamic URL (ac-6 gap) or same (method,path) already seen
+            self._seen_api.add(qn)
+            self.nodes.append(
+                Node(
+                    kind=API_CALL,
+                    qualified_name=qn,
+                    name=method,
+                    provenance=self.prov,
+                    path=self.rel_path,
+                    start_line=self._line(call[0].start_point),
+                    end_line=self._line(call[0].end_point),
+                )
+            )
 
     def _collect_param_refs(self, func: TSNode, container: str) -> None:
         """Record ``func``'s parameter types as dependencies of ``container`` (ac-4).

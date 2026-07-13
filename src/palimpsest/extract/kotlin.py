@@ -26,8 +26,9 @@ import tree_sitter_kotlin as tskotlin
 from tree_sitter import Language, Parser, Query, QueryCursor, Node as TSNode
 
 from palimpsest.ir import IR, Node, Edge, Provenance
-from palimpsest.ir import REPO, PACKAGE, FILE, CLASS, METHOD, FUNCTION
-from palimpsest.ir import CONTAINS, CALLS
+from palimpsest.ir import REPO, PACKAGE, FILE, CLASS, METHOD, FUNCTION, ENDPOINT
+from palimpsest.ir import CONTAINS, CALLS, DEPENDS_ON, REALIZES, HANDLES
+from palimpsest.extract.spring import AnnotationInfo, spring_role, spring_endpoints
 
 _LANGUAGE = Language(tskotlin.language())
 
@@ -106,6 +107,149 @@ def _is_test_path(rel_path: str) -> bool:
     return any(a == "src" and (b == "test" or b.endswith("Test")) for a, b in zip(parts, parts[1:]))
 
 
+# --- Kotlin annotation reader (the grammar-specific feeder for extract.spring) --------
+# java.py reads its own tree into shared `AnnotationInfo` records; this is the Kotlin
+# structural parallel over the tree-sitter-kotlin grammar, which shapes annotations
+# differently: a bare `@RestController` is an `annotation` wrapping a `user_type`, an
+# `@GetMapping("/x")` is an `annotation` wrapping a `constructor_invocation`
+# (`user_type` + `value_arguments`), and array/named args (`value = ["/x"]`,
+# `method = [RequestMethod.POST]`) read through `collection_literal` nodes. Normalizing
+# all of these here lets the shared mapper see identical inputs on both tiers.
+
+def _ann_simple_name(user_type: TSNode | None) -> str:
+    """Simple annotation name off a ``user_type`` node (``@a.b.Get`` -> ``Get``)."""
+    if user_type is None:
+        return ""
+    return user_type.text.decode().split("<")[0].split(".")[-1].strip()
+
+
+def _string_value(node: TSNode) -> str | None:
+    """Inner text of a Kotlin ``string_literal`` (surrounding quotes stripped), else None."""
+    if node.type != "string_literal":
+        return None
+    text = node.text.decode()
+    return text[1:-1] if len(text) >= 2 else ""
+
+
+def _string_literals(node: TSNode) -> list[str]:
+    """String-literal values of an annotation argument — a bare literal, or every
+    literal inside a ``[...]`` ``collection_literal`` (``@GetMapping(["/a","/b"])``).
+    Non-string elements are dropped."""
+    lit = _string_value(node)
+    if lit is not None:
+        return [lit]
+    if node.type == "collection_literal":
+        out: list[str] = []
+        for child in node.named_children:
+            out.extend(_string_literals(child))
+        return out
+    return []
+
+
+def _annotation_info(ann: TSNode) -> AnnotationInfo | None:
+    """Read one Kotlin ``annotation`` node into an :class:`AnnotationInfo`.
+
+    Positional string-literal args become ``args``; named ``key = value`` attributes
+    become ``named_args`` (string literals — bare or single-element arrays — unquoted;
+    other value expressions, e.g. ``[RequestMethod.POST]``, kept verbatim so the shared
+    mapper's ``RequestMethod.X`` regex still finds the verb)."""
+    if ann.type != "annotation":
+        return None
+    inner = None
+    for c in ann.named_children:
+        if c.type in ("user_type", "constructor_invocation"):
+            inner = c
+            break
+    if inner is None:
+        return None
+    if inner.type == "user_type":
+        return AnnotationInfo(name=_ann_simple_name(inner))
+
+    # constructor_invocation: `Name(arg, key = value, ...)`
+    user_type = None
+    value_args = None
+    for c in inner.named_children:
+        if c.type == "user_type":
+            user_type = c
+        elif c.type == "value_arguments":
+            value_args = c
+    args: list[str] = []
+    named: dict[str, str] = {}
+    if value_args is not None:
+        for va in value_args.named_children:
+            if va.type != "value_argument":
+                continue
+            if any(ch.type == "=" for ch in va.children):  # named `key = value`
+                key = None
+                val_node = None
+                for ch in va.named_children:
+                    if key is None and ch.type == "identifier":
+                        key = ch.text.decode()
+                    else:
+                        val_node = ch
+                if key is not None and val_node is not None:
+                    lits = _string_literals(val_node)
+                    named[key] = lits[0] if lits else val_node.text.decode()
+            else:  # positional
+                for ch in va.named_children:
+                    args.extend(_string_literals(ch))
+    return AnnotationInfo(name=_ann_simple_name(user_type), args=tuple(args), named_args=named)
+
+
+def _annotations(decl_node: TSNode) -> list[AnnotationInfo]:
+    """Every annotation on a class/function declaration's ``modifiers`` — the Kotlin
+    reader that feeds the shared ``spring`` mapper (java.py's ``_annotations`` parallel)."""
+    out: list[AnnotationInfo] = []
+    for child in decl_node.named_children:
+        if child.type != "modifiers":
+            continue
+        for ann in child.named_children:
+            info = _annotation_info(ann)
+            if info is not None:
+                out.append(info)
+    return out
+
+
+def _type_after_name(node: TSNode) -> TSNode | None:
+    """The type node that follows the declared name in a ``class_parameter`` /
+    ``variable_declaration``: skip a leading ``modifiers`` block and the first
+    ``identifier`` (the parameter/property name); the next named child is the type."""
+    seen_name = False
+    for c in node.named_children:
+        if c.type == "modifiers":
+            continue
+        if not seen_name and c.type == "identifier":
+            seen_name = True
+            continue
+        return c
+    return None
+
+
+def _ctor_param_type_names(class_node: TSNode) -> list[str]:
+    """Simple type names of the class's PRIMARY-CONSTRUCTOR value params — Kotlin's
+    constructor-injection surface (so injected deps reach DEPENDS_ON, ac-9)."""
+    out: list[str] = []
+    for c in class_node.named_children:
+        if c.type != "primary_constructor":
+            continue
+        for cps in c.named_children:
+            if cps.type != "class_parameters":
+                continue
+            for cp in cps.named_children:
+                if cp.type == "class_parameter":
+                    out.append(_type_simple(_type_after_name(cp)))
+    return out
+
+
+def _property_type_name(prop_decl: TSNode) -> str:
+    """Simple type name of a property (field), or ``?`` when the type is inferred —
+    covers ``@Autowired`` field injection."""
+    for c in prop_decl.named_children:
+        if c.type == "variable_declaration":
+            return _type_simple(_type_after_name(c))
+    return "?"
+
+
 class _FileWalker:
     """Collects structural nodes + CONTAINS edges for a single parsed Kotlin file."""
 
@@ -117,6 +261,9 @@ class _FileWalker:
         self.pkg = _package_fqn(root)
         self.nodes: list[Node] = []
         self.edges: list[Edge] = []
+        # class fqn -> referenced simple type names (ctor-injection params + fields),
+        # resolved to Class->Class DEPENDS_ON at corpus assembly (ac-9).
+        self.class_refs: dict[str, set[str]] = {}
 
     def _edge(self, kind: str, src: str, dst: str) -> None:
         self.edges.append(Edge(kind=kind, src=src, dst=dst, provenance=self.prov))
@@ -181,6 +328,7 @@ class _FileWalker:
         if name is None:
             return
         fqn = f"{self.pkg}.{name}" if self.pkg else name
+        class_anns = _annotations(node)
         self.nodes.append(
             Node(
                 kind=CLASS,
@@ -190,9 +338,18 @@ class _FileWalker:
                 path=self.rel_path,
                 start_line=_line(node.start_point),
                 end_line=_line(node.end_point),
+                # Spring DI/stereotype role marker (design contract Decision 6): a pure
+                # property off identity; None when the class carries no stereotype.
+                role=spring_role(class_anns),
             )
         )
         self._edge(CONTAINS, self.rel_path, fqn)
+        refs = self.class_refs.setdefault(fqn, set())
+        # Constructor-injection params are dependencies of the declaring class (injected
+        # deps reach DEPENDS_ON — no new edge kind, ac-9).
+        for ref in _ctor_param_type_names(node):
+            if ref and ref != "?":
+                refs.add(ref)
         body = None
         for c in node.named_children:
             if c.type == "class_body":
@@ -202,13 +359,21 @@ class _FileWalker:
             return
         for member in body.named_children:
             if member.type == "function_declaration":
-                self._method_decl(member, class_fqn=fqn)
+                self._method_decl(member, class_fqn=fqn, class_anns=class_anns)
+            elif member.type == "property_declaration":
+                # property/field types (incl. @Autowired field injection) are deps too.
+                ref = _property_type_name(member)
+                if ref and ref != "?":
+                    refs.add(ref)
 
-    def _method_decl(self, node: TSNode, class_fqn: str) -> None:
+    def _method_decl(
+        self, node: TSNode, class_fqn: str, class_anns: list[AnnotationInfo]
+    ) -> None:
         name = _name_of(node)
         if name is None:
             return
         fqn = self._callable_fqn(name, _param_types(node), class_fqn=class_fqn)
+        method_anns = _annotations(node)
         self.nodes.append(
             Node(
                 kind=METHOD,
@@ -221,6 +386,24 @@ class _FileWalker:
             )
         )
         self._edge(CONTAINS, class_fqn, fqn)
+        # Spring HTTP-API Endpoints (design contract Decisions 1 & 2), mirroring java.py:
+        # a controller handler realizes one or more ``spring:``-discriminated Endpoints;
+        # the File REALIZES each and the handler Method HANDLES it. A non-controller /
+        # view-returning method yields [] from the shared mapper.
+        for method_token, ep_qn in spring_endpoints(class_anns, method_anns):
+            self.nodes.append(
+                Node(
+                    kind=ENDPOINT,
+                    qualified_name=ep_qn,
+                    name=method_token,
+                    provenance=self.prov,
+                    path=self.rel_path,
+                    start_line=_line(node.start_point),
+                    end_line=_line(node.end_point),
+                )
+            )
+            self._edge(REALIZES, self.rel_path, ep_qn)
+            self._edge(HANDLES, fqn, ep_qn)
 
 
 # A resolved call site: (rel_path, call_line, callee_name).
@@ -279,6 +462,33 @@ def _calls_edges(nodes: list[Node], call_sites: list[CallSite], prov: Provenance
     return out
 
 
+def _index_by_simple_name(nodes: list[Node], kind: str) -> dict[str, list[str]]:
+    idx: dict[str, list[str]] = {}
+    for n in nodes:
+        if n.kind == kind:
+            idx.setdefault(n.name, []).append(n.qualified_name)
+    return idx
+
+
+def _depends_on_edges(
+    nodes: list[Node], class_refs: dict[str, set[str]], prov: Provenance
+) -> list[Edge]:
+    """DEPENDS_ON (Class->Class): resolve referenced simple type names (ctor-injection
+    params + property fields) against known classes by unqualified name — best-effort,
+    no full type resolution (java.py parallel). Self-loops and dupes suppressed."""
+    by_simple = _index_by_simple_name(nodes, CLASS)
+    seen: set[tuple[str, str]] = set()
+    out: list[Edge] = []
+    for src_fqn, refs in class_refs.items():
+        for ref in refs:
+            for dst_fqn in by_simple.get(ref, ()):
+                if dst_fqn == src_fqn or (src_fqn, dst_fqn) in seen:
+                    continue
+                seen.add((src_fqn, dst_fqn))
+                out.append(Edge(kind=DEPENDS_ON, src=src_fqn, dst=dst_fqn, provenance=prov))
+    return out
+
+
 def _iter_kotlin_files(root: Path):
     for p in sorted(root.rglob("*.kt")):
         if p.is_file():
@@ -298,6 +508,7 @@ def extract(root: Path | str, provenance: Provenance, repo_name: str | None = No
     nodes: list[Node] = []
     edges: list[Edge] = []
     packages: set[str] = set()
+    class_refs: dict[str, set[str]] = {}
     call_sites: list[CallSite] = []
 
     for path in _iter_kotlin_files(root):
@@ -310,8 +521,13 @@ def extract(root: Path | str, provenance: Provenance, repo_name: str | None = No
         edges.extend(walker.edges)
         if walker.pkg:
             packages.add(walker.pkg)
+        for fqn, refs in walker.class_refs.items():
+            class_refs.setdefault(fqn, set()).update(refs)
         call_sites.extend(_scan_calls(rel, tree.root_node))
 
+    # DEPENDS_ON (Class->Class): resolve referenced simple type names against known
+    # classes by unqualified name (injected deps reuse this edge — no new kind, ac-9).
+    edges.extend(_depends_on_edges(nodes, class_refs, provenance))
     edges.extend(_calls_edges(nodes, call_sites, provenance))
 
     repo = Node(kind=REPO, qualified_name=repo_name, name=repo_name, provenance=provenance)

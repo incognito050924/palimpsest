@@ -19,6 +19,10 @@ from palimpsest.recall.graphrag import (
     reconcile_recall,
     expand,
 )
+from palimpsest.recall.api_links import (
+    recall_endpoint_callers,
+    recall_call_endpoints,
+)
 
 __all__ = [
     "recall",
@@ -31,4 +35,6 @@ __all__ = [
     "recall_test_impact",
     "reconcile_recall",
     "expand",
+    "recall_endpoint_callers",
+    "recall_call_endpoints",
 ]
