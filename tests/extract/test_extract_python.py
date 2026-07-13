@@ -22,7 +22,7 @@ The load-bearing Python facts these tests pin:
 
 from pathlib import Path
 
-from palimpsest.ir import Provenance, FILE, CLASS, METHOD, FUNCTION, VARIABLE
+from palimpsest.ir import Provenance, REPO, FILE, CLASS, METHOD, FUNCTION, VARIABLE
 from palimpsest.extract.python import extract
 
 PROV = Provenance(
@@ -229,3 +229,58 @@ def test_python_query_is_per_language_and_valid():
     assert tags.is_file() and tags.read_text().strip()
     Query(Language(tspython.language()), tags.read_text())  # must compile
     assert pymod._QUERY_DIR == qdir
+
+
+# ── is_test marker (issue #17: multilang test-impact) ──────────────────────────
+# Signals: test_*.py / *_test.py filename, or a pytest/unittest import. The whole
+# file's code-unit nodes (FILE/CLASS/METHOD/FUNCTION) are marked; VARIABLE/Repo not.
+# Mirrors the java.py is_test precedent (post-walk pure-property mutation).
+
+_TEST_FN = "def test_it():\n    helper()\n\n\ndef helper():\n    return 1\n"
+_PROD = "class Widget:\n    def render(self):\n        return 1\n\n\ndef build():\n    return Widget()\n"
+_PYTEST_IMPORT = "import pytest\n\n\ndef check():\n    assert True\n"
+
+
+def test_is_test_marked_by_test_filename(tmp_path):
+    ir = _extract(tmp_path, {"test_widget.py": _TEST_FN, "widget.py": _PROD})
+    for n in ir.nodes:
+        if n.path == "test_widget.py" and n.kind in (FILE, CLASS, METHOD, FUNCTION):
+            assert n.is_test is True, (n.kind, n.qualified_name)
+        if n.path == "widget.py":
+            assert not n.is_test, (n.kind, n.qualified_name)
+
+
+def test_is_test_marked_by_suffix_filename(tmp_path):
+    ir = _extract(tmp_path, {"helpers_test.py": _TEST_FN})
+    fns = [n for n in ir.nodes if n.kind == FUNCTION]
+    assert fns and all(n.is_test for n in fns)
+
+
+def test_is_test_marked_by_pytest_import(tmp_path):
+    # NOT test-named, but imports pytest -> a test file by the import signal.
+    ir = _extract(tmp_path, {"conftest_helpers.py": _PYTEST_IMPORT})
+    code = [n for n in ir.nodes if n.kind in (FILE, FUNCTION)]
+    assert code and all(n.is_test for n in code)
+
+
+def test_is_test_marks_function_kind_but_never_repo(tmp_path):
+    ir = _extract(tmp_path, {"test_widget.py": _TEST_FN})
+    assert any(n.kind == FUNCTION and n.is_test for n in ir.nodes)  # module-level test fn
+    for n in ir.nodes:
+        if n.kind == REPO:
+            assert not n.is_test  # Repo is never a test node
+
+
+def test_is_test_zero_misclassification(tmp_path):
+    ir = _extract(tmp_path, {"test_a.py": _TEST_FN, "b_test.py": _TEST_FN, "prod.py": _PROD})
+
+    def expected(path):  # filename-convention ground truth
+        base = path.rsplit("/", 1)[-1]
+        return base.startswith("test_") or base.endswith("_test.py")
+
+    mis = [
+        (n.kind, n.path, bool(n.is_test))
+        for n in ir.nodes
+        if n.kind in (FILE, CLASS, METHOD, FUNCTION) and bool(n.is_test) != expected(n.path)
+    ]
+    assert mis == [], mis

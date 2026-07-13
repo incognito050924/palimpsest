@@ -158,3 +158,42 @@ def test_typescript_query_compiles_against_ts_and_tsx():
     assert tags.is_file() and tags.read_text().strip()
     Query(Language(tstypescript.language_typescript()), tags.read_text())  # must compile
     Query(Language(tstypescript.language_tsx()), tags.read_text())  # must compile
+
+
+# ── is_test marker (issue #17: multilang test-impact) ──────────────────────────
+# Signals via the shared ecmascript core: *.test.* / *.spec.* filename, or a
+# jest/vitest/mocha import. Marks the file's code-unit nodes; production stays falsy.
+
+_TS_TEST = 'export function checkRender() {\n  render();\n}\n'
+_TS_PROD = 'export function render(): string {\n  return "w";\n}\n'
+_TS_IMPORT_ONLY = 'import { expect } from "vitest";\n\nexport function helper() {}\n'
+
+
+def test_is_test_marked_by_test_filename(tmp_path):
+    ir = _extract(tmp_path, {"widget.test.ts": _TS_TEST, "widget.ts": _TS_PROD})
+    for n in ir.nodes:
+        if n.path == "widget.test.ts" and n.kind in (FILE, CLASS, METHOD, FUNCTION):
+            assert n.is_test is True, (n.kind, n.qualified_name)
+        if n.path == "widget.ts":
+            assert not n.is_test, (n.kind, n.qualified_name)
+
+
+def test_is_test_marked_by_spec_filename(tmp_path):
+    ir = _extract(tmp_path, {"widget.spec.tsx": _TS_TEST})
+    fns = [n for n in ir.nodes if n.kind == FUNCTION]
+    assert fns and all(n.is_test for n in fns)
+
+
+def test_is_test_marked_by_vitest_import(tmp_path):
+    # NOT test-named, but imports vitest -> a test file by the import signal.
+    ir = _extract(tmp_path, {"svc.ts": _TS_IMPORT_ONLY})
+    code = [n for n in ir.nodes if n.kind in (FILE, FUNCTION)]
+    assert code and all(n.is_test for n in code)
+
+
+def test_is_test_never_marks_repo(tmp_path):
+    ir = _extract(tmp_path, {"widget.test.ts": _TS_TEST})
+    assert any(n.kind == FUNCTION and n.is_test for n in ir.nodes)
+    for n in ir.nodes:
+        if n.kind == REPO:
+            assert not n.is_test

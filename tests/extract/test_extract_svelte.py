@@ -265,3 +265,27 @@ def test_svelte_joins_unified_ecmascript_ir(tmp_path):
     # both files are contained by the single Repo node.
     assert ir.has_edge("CONTAINS", "U", "comp.svelte")
     assert ir.has_edge("CONTAINS", "U", "util.ts")
+
+
+# ── is_test marker (issue #17: multilang test-impact) ──────────────────────────
+# Svelte funnels through the shared ecmascript finalize_ir, so the same signals
+# apply: *.test.* / *.spec.* filename, or a jest/vitest/mocha import in <script>.
+
+_SV_TEST = '<script>\n  export function mount() {}\n</script>\n\n<div/>\n'
+_SV_IMPORT_ONLY = '<script>\n  import { it } from "vitest";\n  export function helper() {}\n</script>\n\n<div/>\n'
+_SV_PROD = '<script>\n  export function render() {}\n</script>\n\n<div/>\n'
+
+
+def test_is_test_marked_by_test_svelte_filename(tmp_path):
+    ir = _extract(tmp_path, {"Widget.test.svelte": _SV_TEST, "Widget.svelte": _SV_PROD})
+    for n in ir.nodes:
+        if n.path == "Widget.test.svelte" and n.kind in (FILE, FUNCTION):
+            assert n.is_test is True, (n.kind, n.qualified_name)
+        if n.path == "Widget.svelte":
+            assert not n.is_test, (n.kind, n.qualified_name)
+
+
+def test_is_test_marked_by_vitest_import_in_script(tmp_path):
+    ir = _extract(tmp_path, {"Panel.svelte": _SV_IMPORT_ONLY})
+    code = [n for n in ir.nodes if n.kind in (FILE, FUNCTION)]
+    assert code and all(n.is_test for n in code)

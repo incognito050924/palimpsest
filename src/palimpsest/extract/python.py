@@ -128,6 +128,26 @@ def _dotted_target(node: TSNode) -> str | None:
     return None
 
 
+# ── is_test marker (issue #17) ─────────────────────────────────────────────────
+# The code-unit kinds a test file's nodes carry the marker on (mirrors the java.py
+# precedent). VARIABLE and the Repo/Package containers are intentionally excluded.
+_TEST_MARK_KINDS = (FILE, CLASS, METHOD, FUNCTION)
+
+
+def _is_test_filename(rel_path: str) -> bool:
+    """Python test-file convention: ``test_*.py`` or ``*_test.py``."""
+    base = Path(rel_path).name
+    return base.startswith("test_") or base.endswith("_test.py")
+
+
+def _is_test_import(module: str) -> bool:
+    """A pytest / unittest import marks the importing file as test code."""
+    return (
+        module == "pytest" or module.startswith("pytest.")
+        or module == "unittest" or module.startswith("unittest.")
+    )
+
+
 class _FileWalker:
     """Collects structural nodes + CONTAINS/IMPORTS edges for one parsed Python file.
 
@@ -146,6 +166,7 @@ class _FileWalker:
         self.edges: list[Edge] = []
         self.decorator_calls: list[tuple[str, str]] = []
         self.seen_vars: set[str] = set()
+        self.imports_test = False  # set when a pytest/unittest import is seen
 
     def _edge(self, kind: str, src: str, dst: str) -> None:
         self.edges.append(Edge(kind=kind, src=src, dst=dst, provenance=self.prov))
@@ -184,6 +205,13 @@ class _FileWalker:
                 self._maybe_variable(child)
             elif child.type in ("import_statement", "import_from_statement"):
                 self._import(child)
+        # is_test is a pure PROPERTY (not identity): once the file's signals are
+        # known, mark every code-unit node it produced. Post-walk so imports seen
+        # anywhere in the file still count. (issue #17, mirrors java.py)
+        if _is_test_filename(self.rel_path) or self.imports_test:
+            for n in self.nodes:
+                if n.kind in _TEST_MARK_KINDS:
+                    n.is_test = True
 
     def _function_def(self, node: TSNode, class_fqn: str | None) -> str | None:
         name_node = node.child_by_field_name("name")
@@ -288,10 +316,15 @@ class _FileWalker:
                 module = _dotted_target(c)
                 if module:
                     self._edge(IMPORTS, self.rel_path, module)
+                    if _is_test_import(module):
+                        self.imports_test = True
         elif node.type == "import_from_statement":
             mod = node.child_by_field_name("module_name")
             if mod is not None and mod.type == "dotted_name":
-                self._edge(IMPORTS, self.rel_path, mod.text.decode())
+                module = mod.text.decode()
+                self._edge(IMPORTS, self.rel_path, module)
+                if _is_test_import(module):
+                    self.imports_test = True
 
 
 # A resolved call site: (rel_path, call_line, callee_name).

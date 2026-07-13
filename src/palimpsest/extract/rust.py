@@ -54,6 +54,19 @@ _TAGS_QUERY = Query(_LANGUAGE, (_QUERY_DIR / "tags.scm").read_text())
 _TYPE_ITEMS = frozenset({"struct_item", "enum_item", "trait_item", "union_item"})
 
 
+def _is_test_path(rel_path: str) -> bool:
+    """Rust integration-test convention: the file lives under a ``tests/`` directory."""
+    return "tests" in rel_path.split("/")[:-1]
+
+
+def _attr_marks_test(attr_item: TSNode) -> bool:
+    """True for a test attribute: ``#[test]``, ``#[cfg(test)]`` / ``#[cfg(all(test,…))]``,
+    or a framework test like ``#[tokio::test]``. Attributes precede their item as a
+    sibling ``attribute_item`` node (tree-sitter-rust)."""
+    t = attr_item.text.decode().replace(" ", "")
+    return "cfg(test" in t or t == "#[test]" or t.endswith("::test]")
+
+
 def _parser() -> Parser:
     return Parser(_LANGUAGE)
 
@@ -151,16 +164,33 @@ class _FileWalker:
                 end_line=total_lines,
             )
         )
-        self._walk(self.root, mod_path=[])
+        # is_test (issue #17): a file under `tests/` is an integration test — the
+        # File node AND every item is test. Inline unit tests (#[cfg(test)] mod /
+        # #[test]) are scope-level and handled inside _walk, leaving the File node
+        # (a production file) unmarked.
+        in_test = _is_test_path(self.rel_path)
+        if in_test:
+            self.nodes[-1].is_test = True  # the FILE node just appended
+        self._walk(self.root, mod_path=[], in_test=in_test)
 
-    def _walk(self, container: TSNode, mod_path: list[str]) -> None:
+    def _walk(self, container: TSNode, mod_path: list[str], in_test: bool = False) -> None:
         """Dispatch module-direct items; recurse into inline ``mod`` bodies.
 
         ``container`` is a ``source_file`` (root) or a ``mod`` ``declaration_list`` —
-        both expose their items as named children.
+        both expose their items as named children. ``in_test`` propagates the enclosing
+        test scope (a ``tests/`` file or a ``#[cfg(test)] mod``); a ``#[test]`` /
+        ``#[cfg(test)]`` attribute preceding an item scopes just that item. Newly
+        appended nodes are marked is_test post-dispatch — pure PROPERTY, mirrors java.py.
         """
+        pending_test = False  # a test attribute seen for the NEXT item
         for child in container.named_children:
             t = child.type
+            if t == "attribute_item":
+                pending_test = pending_test or _attr_marks_test(child)
+                continue
+            item_test = in_test or pending_test
+            pending_test = False
+            before = len(self.nodes)
             if t == "function_item":
                 self._function_item(child, mod_path, class_fqn=None)
             elif t in _TYPE_ITEMS:
@@ -171,9 +201,18 @@ class _FileWalker:
                 body = child.child_by_field_name("body")
                 name_node = child.child_by_field_name("name")
                 if body is not None and name_node is not None:
-                    self._walk(body, mod_path + [name_node.text.decode()])
+                    # recursion marks nodes inside with the mod's own test scope
+                    self._walk(body, mod_path + [name_node.text.decode()], in_test=item_test)
+                continue
             elif t == "use_declaration":
                 self._use(child)
+                continue
+            else:
+                continue
+            if item_test:
+                for n in self.nodes[before:]:
+                    if n.kind in (CLASS, METHOD, FUNCTION):
+                        n.is_test = True
 
     def _function_item(self, node: TSNode, mod_path: list[str],
                        class_fqn: str | None) -> None:

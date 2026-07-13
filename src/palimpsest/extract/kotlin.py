@@ -97,6 +97,15 @@ def _package_fqn(root: TSNode) -> str:
     return ""
 
 
+def _is_test_path(rel_path: str) -> bool:
+    """Gradle/Maven test-source convention: a ``src/<test-source-set>`` segment pair.
+    The source set is ``test`` (standard) or ends in ``Test`` (Gradle ``commonTest`` /
+    ``jvmTest`` / ``androidTest`` for Kotlin MPP / Android); ``testFixtures`` is a
+    fixtures source set and stays production."""
+    parts = rel_path.split("/")
+    return any(a == "src" and (b == "test" or b.endswith("Test")) for a, b in zip(parts, parts[1:]))
+
+
 class _FileWalker:
     """Collects structural nodes + CONTAINS edges for a single parsed Kotlin file."""
 
@@ -141,6 +150,13 @@ class _FileWalker:
                 self._function_decl(child)
             elif child.type == "class_declaration":
                 self._class_decl(child)
+        # is_test marker (issue #17): Kotlin parses no imports/annotations here, so
+        # the signal is the Gradle `src/test` path convention. Marks every code-unit
+        # node this file produced — pure PROPERTY, post-walk (mirrors java.py).
+        if _is_test_path(self.rel_path):
+            for n in self.nodes:
+                if n.kind in (FILE, CLASS, METHOD, FUNCTION):
+                    n.is_test = True
 
     def _function_decl(self, node: TSNode) -> None:
         name = _name_of(node)

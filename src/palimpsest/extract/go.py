@@ -198,6 +198,7 @@ class _FileWalker:
         self.edges: list[Edge] = []
         # container fqn -> referenced simple type names (DEPENDS_ON, resolved later)
         self.type_refs: dict[str, set[str]] = defaultdict(set)
+        self.imports_test = False  # set when a `testing` import is seen
 
     def _edge(self, kind: str, src: str, dst: str) -> None:
         self.edges.append(Edge(kind=kind, src=src, dst=dst, provenance=self.prov))
@@ -238,6 +239,12 @@ class _FileWalker:
                 self._type_decl(child)
             elif child.type == "import_declaration":
                 self._import_decl(child)
+        # is_test marker (issue #17): *_test.go filename or a `testing` import marks
+        # every code-unit node this file produced. Pure PROPERTY, post-walk (java.py).
+        if self.rel_path.endswith("_test.go") or self.imports_test:
+            for n in self.nodes:
+                if n.kind in (FILE, CLASS, METHOD, FUNCTION):
+                    n.is_test = True
 
     def _import_decl(self, node: TSNode) -> None:
         for spec in _import_specs(node):
@@ -247,6 +254,8 @@ class _FileWalker:
             target = path_node.text.decode().strip('"').strip("`")
             if target:
                 self._edge(IMPORTS, self.rel_path, target)
+                if target == "testing" or target.startswith("testing/"):
+                    self.imports_test = True
 
     def _type_decl(self, node: TSNode) -> None:
         # `type ( A struct{}; B int )` groups several type_specs under one decl.

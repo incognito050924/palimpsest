@@ -18,7 +18,7 @@ The load-bearing Rust facts these tests pin:
 
 from pathlib import Path
 
-from palimpsest.ir import Provenance, FILE, CLASS, METHOD, FUNCTION
+from palimpsest.ir import Provenance, REPO, FILE, CLASS, METHOD, FUNCTION
 from palimpsest.extract.rust import extract
 
 PROV = Provenance(
@@ -180,3 +180,50 @@ def test_rust_query_is_per_language_and_valid():
     assert tags.is_file() and tags.read_text().strip()
     Query(Language(tsrust.language()), tags.read_text())  # must compile
     assert rmod._QUERY_DIR == qdir
+
+
+# ── is_test marker (issue #17: multilang test-impact) ──────────────────────────
+# Rust unit tests are colocated with production in the SAME file under a
+# `#[cfg(test)] mod tests` (or a `#[test]` fn), so marking is SCOPE-level, not
+# whole-file. Integration tests live under a `tests/` dir → whole-file signal.
+
+_RS_UNIT = (
+    "pub fn render() -> i32 {\n    1\n}\n\n"
+    "#[cfg(test)]\nmod tests {\n"
+    "    use super::*;\n\n"
+    "    #[test]\n    fn it_renders() {\n        render();\n    }\n\n"
+    "    fn helper() {}\n"
+    "}\n"
+)
+_RS_INTEGRATION = "#[test]\nfn end_to_end() {\n    assert_eq!(1, 1);\n}\n"
+
+
+def test_is_test_scope_marks_only_cfg_test_items_not_production(tmp_path):
+    ir = _extract(tmp_path, {"widget.rs": _RS_UNIT})
+    by = {n.qualified_name: n for n in ir.nodes}
+    # the production fn is NOT test
+    prod = next(n for n in ir.nodes if n.name == "render")
+    assert not prod.is_test, prod.qualified_name
+    # the #[test]/#[cfg(test)]-scoped fns ARE test
+    it = next(n for n in ir.nodes if n.name == "it_renders")
+    helper = next(n for n in ir.nodes if n.name == "helper")
+    assert it.is_test is True
+    assert helper.is_test is True  # inside #[cfg(test)] mod, even without its own #[test]
+    # the FILE itself is production (inline test mod does not make the file a test file)
+    fnode = next(n for n in ir.nodes if n.kind == FILE)
+    assert not fnode.is_test
+
+
+def test_is_test_marked_by_tests_dir_path(tmp_path):
+    ir = _extract(tmp_path, {"tests/e2e.rs": _RS_INTEGRATION})
+    for n in ir.nodes:
+        if n.kind in (FILE, FUNCTION):
+            assert n.is_test is True, (n.kind, n.qualified_name)
+
+
+def test_is_test_never_marks_repo(tmp_path):
+    ir = _extract(tmp_path, {"tests/e2e.rs": _RS_INTEGRATION})
+    assert any(n.kind == FUNCTION and n.is_test for n in ir.nodes)
+    for n in ir.nodes:
+        if n.kind == REPO:
+            assert not n.is_test

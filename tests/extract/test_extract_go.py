@@ -20,7 +20,7 @@ The load-bearing Go facts these tests pin:
 
 from pathlib import Path
 
-from palimpsest.ir import Provenance, PACKAGE, FILE, CLASS, METHOD, FUNCTION
+from palimpsest.ir import Provenance, REPO, PACKAGE, FILE, CLASS, METHOD, FUNCTION
 from palimpsest.extract.go import extract
 
 PROV = Provenance(
@@ -275,3 +275,50 @@ def test_go_query_is_per_language_and_valid():
     assert tags.is_file() and tags.read_text().strip()
     Query(Language(tsgo.language()), tags.read_text())  # must compile
     assert gomod._QUERY_DIR == qdir
+
+
+# ── is_test marker (issue #17: multilang test-impact) ──────────────────────────
+# Signals: *_test.go filename, or a `testing` import. The file's code-unit nodes
+# (FILE/CLASS/METHOD/FUNCTION) are marked; Repo/Package never are.
+
+_GO_TEST = 'package app\n\nimport "testing"\n\nfunc TestRender(t *testing.T) {\n\tRender()\n}\n'
+_GO_PROD = 'package app\n\nfunc Render() string {\n\treturn "w"\n}\n'
+_GO_IMPORT_ONLY = 'package app\n\nimport "testing"\n\nfunc Helper(t *testing.T) {}\n'
+
+
+def test_is_test_marked_by_test_go_filename(tmp_path):
+    ir = _extract(tmp_path, {"widget_test.go": _GO_TEST, "widget.go": _GO_PROD})
+    for n in ir.nodes:
+        if n.path == "widget_test.go" and n.kind in (FILE, CLASS, METHOD, FUNCTION):
+            assert n.is_test is True, (n.kind, n.qualified_name)
+        if n.path == "widget.go":
+            assert not n.is_test, (n.kind, n.qualified_name)
+
+
+def test_is_test_marked_by_testing_import(tmp_path):
+    # NOT *_test.go, but imports "testing" -> a test file by the import signal.
+    ir = _extract(tmp_path, {"helper.go": _GO_IMPORT_ONLY})
+    code = [n for n in ir.nodes if n.kind in (FILE, FUNCTION)]
+    assert code and all(n.is_test for n in code)
+
+
+def test_is_test_marks_function_kind_but_never_repo_package(tmp_path):
+    ir = _extract(tmp_path, {"widget_test.go": _GO_TEST})
+    assert any(n.kind == FUNCTION and n.is_test for n in ir.nodes)  # top-level test fn
+    for n in ir.nodes:
+        if n.kind in (REPO, PACKAGE):
+            assert not n.is_test  # containers are never test nodes
+
+
+def test_is_test_zero_misclassification(tmp_path):
+    ir = _extract(tmp_path, {"a_test.go": _GO_TEST, "prod.go": _GO_PROD})
+
+    def expected(path):
+        return path.rsplit("/", 1)[-1].endswith("_test.go")
+
+    mis = [
+        (n.kind, n.path, bool(n.is_test))
+        for n in ir.nodes
+        if n.kind in (FILE, CLASS, METHOD, FUNCTION) and bool(n.is_test) != expected(n.path)
+    ]
+    assert mis == [], mis

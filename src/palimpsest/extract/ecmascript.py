@@ -488,11 +488,41 @@ def _resolve_imports(edges: list[Edge], file_index: set[str]) -> list[Edge]:
     return out
 
 
+def _is_test_filename(rel_path: str) -> bool:
+    """JS/TS/Svelte test-file convention: ``<name>.test.<ext>`` / ``<name>.spec.<ext>``."""
+    parts = Path(rel_path).name.split(".")
+    return len(parts) >= 3 and parts[-2] in ("test", "spec")
+
+
+def _is_test_lib(spec: str) -> bool:
+    """A jest / vitest / mocha import marks the importing file as test code."""
+    return (
+        spec in ("jest", "vitest", "mocha")
+        or spec.startswith(("jest/", "vitest/", "mocha/", "@jest/"))
+    )
+
+
+def _mark_test_nodes(nodes: list[Node], edges: list[Edge]) -> None:
+    """is_test marker (issue #17): a file is test code if its name matches the
+    test convention OR it imports a test lib. Read from the RAW import specifiers
+    (call BEFORE _resolve_imports rewrites them). Marks every code-unit node of a
+    test file — pure PROPERTY, mirrors java.py. Covers TS/JS/Svelte (all funnel here).
+    """
+    test_paths = {n.path for n in nodes if n.kind == FILE and _is_test_filename(n.path)}
+    for e in edges:
+        if e.kind == IMPORTS and _is_test_lib(e.dst):
+            test_paths.add(e.src)
+    for n in nodes:
+        if n.kind in (FILE, CLASS, METHOD, FUNCTION) and n.path in test_paths:
+            n.is_test = True
+
+
 def finalize_ir(nodes: list[Node], edges: list[Edge], repo_name: str, provenance: Provenance) -> IR:
     """Wrap concatenated fragment(s) into a full IR: union-wide IMPORTS resolution +
     ONE Repo node + Repo-CONTAINS->File per file (NO Package nodes — ECMAScript has
     no packages; community.py's containers are the Files carrying top-level Functions).
     """
+    _mark_test_nodes(nodes, edges)  # BEFORE _resolve_imports (needs raw specifiers)
     file_index = {n.qualified_name for n in nodes if n.kind == FILE}
     edges = _resolve_imports(edges, file_index)
     repo = Node(kind=REPO, qualified_name=repo_name, name=repo_name, provenance=provenance)

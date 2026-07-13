@@ -13,7 +13,7 @@ top-level fun -> (:File)-[:CONTAINS]->(:Function), method -> (:Class)-[:CONTAINS
 
 from pathlib import Path
 
-from palimpsest.ir import Provenance, PACKAGE, FILE, CLASS, METHOD, FUNCTION
+from palimpsest.ir import Provenance, REPO, PACKAGE, FILE, CLASS, METHOD, FUNCTION
 from palimpsest.extract.kotlin import extract
 
 PROV = Provenance(
@@ -112,3 +112,76 @@ def test_kotlin_query_is_per_language_and_valid():
     assert tags.is_file() and tags.read_text().strip()
     Query(Language(tskotlin.language()), tags.read_text())  # must compile
     assert kmod._QUERY_DIR == qdir
+
+
+# ── is_test marker (issue #17: multilang test-impact) ──────────────────────────
+# Kotlin has no import/annotation parsing in this slice, so the signal is the
+# Gradle `src/test` path convention. Marks the file's code-unit nodes; production
+# under src/main stays falsy. Pure PROPERTY, mirrors java.py.
+
+_KT_TEST = "package app\n\nclass WidgetTest {\n    fun rendersDirectly() {\n        Widget().render()\n    }\n}\n"
+_KT_PROD = "package app\n\nclass Widget {\n    fun render(): String {\n        return \"w\"\n    }\n}\n"
+
+
+def test_is_test_marked_by_src_test_path(tmp_path):
+    ir = _extract(tmp_path, {
+        "src/test/kotlin/app/WidgetTest.kt": _KT_TEST,
+        "src/main/kotlin/app/Widget.kt": _KT_PROD,
+    })
+    for n in ir.nodes:
+        if n.path == "src/test/kotlin/app/WidgetTest.kt" and n.kind in (FILE, CLASS, METHOD, FUNCTION):
+            assert n.is_test is True, (n.kind, n.qualified_name)
+        if n.path == "src/main/kotlin/app/Widget.kt":
+            assert not n.is_test, (n.kind, n.qualified_name)
+
+
+def test_is_test_never_marks_repo_or_package(tmp_path):
+    ir = _extract(tmp_path, {"src/test/kotlin/app/WidgetTest.kt": _KT_TEST})
+    assert any(n.kind in (CLASS, METHOD) and n.is_test for n in ir.nodes)
+    for n in ir.nodes:
+        if n.kind in (REPO, PACKAGE):
+            assert not n.is_test
+
+
+def test_is_test_zero_misclassification_by_path(tmp_path):
+    ir = _extract(tmp_path, {
+        "src/test/kotlin/app/ATest.kt": _KT_TEST,
+        "src/main/kotlin/app/Prod.kt": _KT_PROD,
+    })
+    parts_test = lambda p: any(
+        seg == "src" and nxt == "test" for seg, nxt in zip(p.split("/"), p.split("/")[1:])
+    )
+    mis = [
+        (n.kind, n.path, bool(n.is_test))
+        for n in ir.nodes
+        if n.kind in (FILE, CLASS, METHOD, FUNCTION) and bool(n.is_test) != parts_test(n.path)
+    ]
+    assert mis == [], mis
+
+
+def test_is_test_marked_by_gradle_test_source_sets(tmp_path):
+    # Gradle *Test source sets (Kotlin MPP / Android) are test code even though the
+    # path is not `src/test`: commonTest / jvmTest / androidTest. `testFixtures` is a
+    # fixtures source set, NOT a test source set — it stays production.
+    ir = _extract(tmp_path, {
+        "src/commonTest/kotlin/app/AT.kt": _KT_TEST,
+        "src/jvmTest/kotlin/app/BT.kt": _KT_TEST,
+        "src/androidTest/kotlin/app/CT.kt": _KT_TEST,
+        "src/testFixtures/kotlin/app/Fix.kt": _KT_PROD,
+        "src/main/kotlin/app/Prod.kt": _KT_PROD,
+    })
+
+    def is_test_set(p):
+        parts = p.split("/")
+        return any(a == "src" and (b == "test" or b.endswith("Test")) for a, b in zip(parts, parts[1:]))
+
+    mis = [
+        (n.kind, n.path, bool(n.is_test))
+        for n in ir.nodes
+        if n.kind in (FILE, CLASS, METHOD, FUNCTION) and bool(n.is_test) != is_test_set(n.path)
+    ]
+    assert mis == [], mis
+    # explicit: testFixtures and main stay production
+    for n in ir.nodes:
+        if n.path and n.path.startswith(("src/testFixtures/", "src/main/")):
+            assert not n.is_test, (n.path, n.kind)
