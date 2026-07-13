@@ -17,6 +17,13 @@ dependencies = [
     # matches the tree-sitter>=0.23 runtime split API / ABI (per-language grammar
     # + queries/python/*.scm).
     "tree-sitter-python>=0.23",
+    # Static TS/JS/React/Svelte extraction -> IR (wi_260713lom). Shared
+    # ecmascript core over per-grammar tree-sitter bindings; each grammar owns its
+    # queries/<lang>/*.scm (ADR-20260706 §결정6). tsx grammar parses .tsx, the
+    # typescript grammar parses .ts; svelte carries embedded <script> blocks.
+    "tree-sitter-typescript>=0.23.2",
+    "tree-sitter-javascript>=0.25.0",
+    "tree-sitter-svelte>=1.0.2",
     # KG ingest (n3-impl-kg-ingest). Official Neo4j driver; raw Cypher, batched
     # UNWIND + MERGE. No neo4j-graphrag (defers LLM-synthesis paths, ac-3).
     "neo4j>=5.14",
