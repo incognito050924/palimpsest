@@ -125,6 +125,24 @@ CALLS 스키마 불변. extractor가 top-level 함수를 노드로 emit하되 �
 
 ---
 
+## 8. 언어별 정련 (실현됨 — 권위는 코드)
+
+> 아래는 실현된 추출기의 결정을 탐색노트에 반영한 것이다. **동작의 SoT는 코드**(각 `extract/<lang>.py` docstring + `tests/extract/test_extract_<lang>.py`)이며, 이 표는 drift할 수 있는 요약이다(§4-11).
+
+### 8-G. Go (issue #11 — `extract/go.py`)
+
+Go는 클래스가 없어 de-Class 하부(commit 138db70)의 대표 사례다. 미해결질문 해소:
+
+- **Q1**(FUNCTION vs METHOD 완화): 신규 `FUNCTION`으로 확정. Go grammar가 `function_declaration`(리시버 없음)과 `method_declaration`(리시버 있음)을 네이티브로 구분하므로 부모-컨텍스트 추론이 아니라 **노드 타입 + 리시버**로 판별. top-level func → File CONTAINS Function, receiver method → 리시버 타입 Class CONTAINS Method.
+- **Q6**(qn 스킴): Go의 package 정체성은 **디렉토리**(import path의 모듈-이하)다. Package = repo-relative 디렉토리, 콜러블은 이를 prefix — `Function: <dir>.name(paramTypes)`, `Method: <dir>.RecvType#name(paramTypes)`, `Class: <dir>.Type`. Go는 오버로드가 없어 paramTypes는 유일성엔 불필요하나 언어 공통 콜러블-정체성 스킴 일관성을 위해 유지.
+- **type_spec → Class**: struct·interface·named type 모두 Class(Java 선례: interface/enum/record → Class). Class는 메서드 컨테이너·Community 그룹핑 단위·DEPENDS_ON 대상 3역할. 모든 리시버 타입은 같은 패키지에 선언되므로(Go 규칙) 파일이 갈려도 Method의 Class 컨테이너가 dangling하지 않음(샘플 122/122 검증). **제네릭 리시버** `func (s *Stack[T])`는 base 타입 `Stack`으로 정규화(포인터·타입 인자 벗김) — 타입 파라미터 `T`로 새면 컨테이너가 dangling하고 서로 다른 제네릭 타입의 동명 메서드가 `pkg.T#m`으로 병합됨(회귀 테스트로 고정).
+- **interface 메서드 시그니처**: 별도 노드로 방출하지 않음 — 본문·호출부가 없어 콜그래프·그룹핑에 기여 없음(§4-3).
+- **type alias**(`type A = B`, `=` 있음)는 Class로 방출하지 않음 — 새 타입이 아니라 기존 타입의 동의어이고 메서드는 원 타입에 붙으므로(§4-3). 방출 대상은 새 named 타입을 만드는 `type A B`(defined type)만.
+- **DEPENDS_ON**(Q4 정련): Go는 정적 타입이므로 방출(ADR-20260713 결정1). struct 필드·함수/메서드 파라미터·결과 타입의 참조 타입명 → Class에 이름 기반 매칭. top-level 함수의 참조는 File/Module을 src로(de-Class 일반화). builtin·외부 타입은 매칭 Class 없으면 방출 안 함(지어내지 않음).
+- **Q3**(VARIABLE): Go 패키지-레벨 `var`/`const`는 노드로 **방출하지 않음** — 회상(`recall/graphrag.py` `_NODE_LABELS`)·Community 어느 소비자도 Variable을 쓰지 않아 §4-3에 따라 만들지 않는다.
+- **is_test 마커**: 범위 밖(recall_test_impact 채널 = issue #7). `_test.go`의 함수·메서드는 일반 Function/Method로 방출하되 `is_test`는 세팅하지 않음.
+- **vendor/**: Go 벤더링 third-party 코드는 추출에서 제외(ecmascript vendored-exclusion 경계와 동형).
+
 ---
 
 # [B] Summary 커버리지·응집 검증

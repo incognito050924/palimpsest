@@ -5,8 +5,10 @@ Per-language extractors each own their ``queries/<lang>/*.scm`` (ADR-20260706
 Kotlin is reachable as ``extract_kotlin``; the ECMAScript family (TS/TSX/JS/JSX)
 is reachable per-language (``extract_typescript``/``extract_javascript``) and, for
 a mixed TS/JS repo, via the ``extract_ecmascript`` driver that concatenates the
-per-family fragments into ONE IR with a union-wide IMPORTS resolution. All are
-dispatchable via the ``EXTRACTORS_BY_EXT`` map keyed on source-file extension.
+per-family fragments into ONE IR with a union-wide IMPORTS resolution. Go is
+reachable as ``extract_go`` (de-Class ontology: package top-level funcs + receiver
+methods). All are dispatchable via the ``EXTRACTORS_BY_EXT`` map keyed on
+source-file extension.
 """
 
 from pathlib import Path
@@ -15,6 +17,7 @@ from palimpsest.ir import IR, Node, Provenance, REPO
 from palimpsest.extract.java import extract as extract_java
 from palimpsest.extract.kotlin import extract as extract_kotlin
 from palimpsest.extract.python import extract as extract_python
+from palimpsest.extract.go import extract as extract_go
 from palimpsest.extract.rust import extract as extract_rust
 from palimpsest.extract.typescript import extract as extract_typescript, TS_PROFILES
 from palimpsest.extract.javascript import extract as extract_javascript, JS_PROFILES
@@ -61,6 +64,7 @@ EXTRACTORS_BY_EXT = {
     ".java": extract_java,
     ".kt": extract_kotlin,
     ".py": extract_python,
+    ".go": extract_go,
     ".rs": extract_rust,
     ".ts": extract_typescript,
     ".tsx": extract_typescript,
@@ -81,6 +85,7 @@ _LANGUAGE_GROUPS = (
     ((".java",), extract_java),
     ((".kt",), extract_kotlin),
     ((".py",), extract_python),
+    ((".go",), extract_go),
     ((".rs",), extract_rust),
     ((".ts", ".tsx", ".js", ".jsx", ".svelte"), extract_ecmascript),
 )
@@ -138,6 +143,7 @@ __all__ = [
     "extract_java",
     "extract_kotlin",
     "extract_python",
+    "extract_go",
     "extract_rust",
     "extract_typescript",
     "extract_javascript",

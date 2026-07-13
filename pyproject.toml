@@ -28,6 +28,10 @@ dependencies = [
     "tree-sitter-typescript>=0.23.2",
     "tree-sitter-javascript>=0.25.0",
     "tree-sitter-svelte>=1.0.2",
+    # Static Go extraction -> IR (issue #11). Same tree-sitter runtime; per-language
+    # grammar + queries/go/*.scm (ADR-20260706 §결정6). Go has no classes: package
+    # top-level funcs (function_declaration) + receiver methods (method_declaration).
+    "tree-sitter-go>=0.23",
     # KG ingest (n3-impl-kg-ingest). Official Neo4j driver; raw Cypher, batched
     # UNWIND + MERGE. No neo4j-graphrag (defers LLM-synthesis paths, ac-3).
     "neo4j>=5.14",
