@@ -22,7 +22,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from palimpsest.extract import changed_paths, extract, read_provenance
+from palimpsest.extract import changed_paths, dispatch, read_provenance
 from palimpsest.ir import branch_scoped_id
 from palimpsest.kg import (
     augment_communities,
@@ -97,7 +97,7 @@ def backfill(driver, repo_path: Path | str) -> BackfillResult:
         with tempfile.TemporaryDirectory() as tmp:
             _materialize_tree(repo_path, sha, tmp)
             prov = read_provenance(repo_path, sha)
-            ir = extract(tmp, prov, repo_name=repo_name)
+            ir = dispatch(tmp, prov, repo_name=repo_name)
             augment_communities(ir, prov)
             ingest(driver, ir)
             # MODIFIES: bind this commit's Episode to only the File(s) it changed.

@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from palimpsest.backfill import _materialize_tree
-from palimpsest.extract import extract, read_provenance
+from palimpsest.extract import dispatch, read_provenance
 from palimpsest.ir import scope_to_branch
 from palimpsest.kg import augment_communities, ingest
 from palimpsest.kg.ingest import (
@@ -200,7 +200,7 @@ def capture(driver, repo_path: Path | str, branches) -> CaptureResult:
         with tempfile.TemporaryDirectory() as tmp:
             _materialize_tree(repo_path, sha, tmp)
             prov = read_provenance(repo_path, sha)
-            base_ir = extract(tmp, prov, repo_name=repo_name)
+            base_ir = dispatch(tmp, prov, repo_name=repo_name)
             augment_communities(base_ir, prov)
             for b in sorted(membership[sha]):
                 ingest(driver, scope_to_branch(base_ir, b))

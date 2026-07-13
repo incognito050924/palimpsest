@@ -45,7 +45,7 @@ from pathlib import Path
 from neo4j import GraphDatabase
 
 from palimpsest.backfill import backfill
-from palimpsest.extract import extract, read_provenance
+from palimpsest.extract import dispatch, read_provenance
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
 from palimpsest.kg.summary import create_vector_index, summary_id
@@ -72,7 +72,7 @@ def _driver():
 
 def _cmd_ingest(args) -> None:
     prov = read_provenance(args.repo, args.commit)
-    ir = extract(args.repo, prov)
+    ir = dispatch(args.repo, prov)
     # Materialize the deterministic Class-level Community partition into the IR so
     # the generic ingest writers persist the Community nodes + MEMBER_OF edges.
     augment_communities(ir, prov)
