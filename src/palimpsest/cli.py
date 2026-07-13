@@ -49,7 +49,12 @@ from palimpsest.extract import dispatch, read_provenance
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
 from palimpsest.kg.summary import create_vector_index, summary_id
-from palimpsest.recall import recall, recall_churn, recall_cochange
+from palimpsest.recall import (
+    recall,
+    recall_churn,
+    recall_cochange,
+    recall_test_impact,
+)
 from palimpsest.recall.graphrag import reconcile_recall
 from palimpsest.reconcile import capture
 
@@ -105,6 +110,14 @@ def _cmd_cochange(args) -> None:
     with _driver() as driver:
         result = recall_cochange(driver, args.file, limit=args.limit)
     _print_channel("CO-CHANGE", "cochange", result, args.limit, seed=args.file)
+
+
+def _cmd_test_impact(args) -> None:
+    with _driver() as driver:
+        result = recall_test_impact(
+            driver, args.method_id, depth=args.depth, limit=args.limit
+        )
+    _print_test_impact(args.method_id, args.depth, args.limit, result)
 
 
 def _cmd_query(args) -> None:
@@ -333,6 +346,33 @@ def _print_channel(title, count_key, result, limit, seed=None) -> None:
         print(f"  - {g}")
 
 
+def _print_test_impact(method_id, depth, limit, result) -> None:
+    # SEPARATE sections (mirrors _print_result/_print_channel): the grounded test-caller
+    # Methods, then the GAPS (always the static-lower-bound note — completeness is never
+    # claimed on this channel), then CONFIDENCE — never a merged prose answer.
+    items = result["items"]
+    print(f"TEST-IMPACT: {method_id}  (depth={depth}, limit={limit})")
+    print()
+    print(f"TEST CALLERS ({len(items)})")
+    if not items:
+        print("  (none)")
+    for it in items:
+        print(
+            f"  - {it['kind']} {it['qualified_name'] or it['id']}  "
+            f"[via CALLS @depth {it['depth']}]"
+        )
+        print(f"      source: {_fmt_source(it['sources'])}")
+    print()
+    gaps = result["gaps"]
+    print(f"GAPS ({len(gaps)})")
+    if not gaps:
+        print("  (none)")
+    for g in gaps:
+        print(f"  - {g}")
+    print()
+    print(f"CONFIDENCE: {result['confidence']}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="palimpsest", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -420,6 +460,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_cc.add_argument("file", help="a repo-relative File path (a File node id)")
     p_cc.add_argument("--limit", type=int, default=25, help="max co-changed files (default 25)")
     p_cc.set_defaults(func=_cmd_cochange)
+
+    p_ti = sub.add_parser(
+        "test-impact",
+        help="test Methods that transitively call a production Method (backward CALLS)",
+    )
+    p_ti.add_argument("method_id", help="a production Method node id (the changed seed)")
+    p_ti.add_argument("--depth", type=int, default=10, help="transitive-hop ceiling (default 10)")
+    p_ti.add_argument("--limit", type=int, default=25, help="max test callers (default 25)")
+    p_ti.set_defaults(func=_cmd_test_impact)
     return parser
 
 
