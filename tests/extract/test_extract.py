@@ -381,3 +381,20 @@ def test_read_provenance_from_git(tmp_path):
     assert prov.source_commit == head
     assert prov.author == "Fixture Author <fix@example.com>"
     assert prov.committed_at  # ISO-8601 string present
+
+
+def test_is_test_marker_from_gradle_test_source_set_path(tmp_path):
+    # A file under a Gradle *Test source set (src/jvmTest — Kotlin MPP / Android
+    # layouts) with NO @Test and NO junit import is still test code by the
+    # generalized path signal. This is Java's PATH signal alone (no fallback).
+    ir = _extract_ir(tmp_path, {
+        "src/jvmTest/java/app/PlainProbe.java": (
+            "package app;\n"
+            "public class PlainProbe {\n"
+            "  public void probe() {}\n"
+            "}\n"
+        ),
+    })
+    nodes = [n for n in ir.nodes if n.kind in (FILE, CLASS, METHOD)]
+    assert nodes
+    assert all(n.is_test for n in nodes), [(n.kind, n.is_test) for n in nodes]

@@ -115,11 +115,17 @@ def _package_fqn(root: TSNode) -> str:
 # PROPERTY (never identity) — see ``ir.Node.is_test``.
 
 def _is_test_path(rel_path: str) -> bool:
-    """True iff ``rel_path`` runs through a ``src/test`` segment pair (Maven/Gradle
-    test-source layout), e.g. ``src/test/...`` or ``mod/src/test/...`` — but not a
-    coincidental substring like ``foo_src/test``."""
+    """True iff ``rel_path`` runs through a ``src/<test-source-set>`` segment pair —
+    Maven/standard-Gradle ``src/test/...`` AND Gradle ``*Test`` source sets
+    (``src/commonTest``, ``src/jvmTest``, ``src/androidTest`` for Kotlin MPP / Android).
+    A segment is a test source set iff it is ``test`` or ends in ``Test`` — so
+    ``testFixtures`` (a fixtures source set) stays production, and a coincidental
+    substring like ``foo_src/test`` never matches."""
     parts = rel_path.split("/")
-    return any(parts[i] == "src" and parts[i + 1] == "test" for i in range(len(parts) - 1))
+    return any(
+        parts[i] == "src" and (parts[i + 1] == "test" or parts[i + 1].endswith("Test"))
+        for i in range(len(parts) - 1)
+    )
 
 
 def _is_junit_import(target: str) -> bool:
