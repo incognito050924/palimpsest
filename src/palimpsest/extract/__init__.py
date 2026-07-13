@@ -26,6 +26,7 @@ from palimpsest.extract.svelte import (
     extract_svelte_fragment,
 )
 from palimpsest.extract.ecmascript import extract_fragment, finalize_ir
+from palimpsest.extract.sveltekit import extract_sveltekit_routes
 from palimpsest.extract.provenance import changed_paths, read_provenance
 
 # Backward-compatible default: `extract` remains the Java extractor.
@@ -48,9 +49,17 @@ def extract_ecmascript(
     ts = extract_fragment(root, provenance, TS_PROFILES)
     js = extract_fragment(root, provenance, JS_PROFILES)
     svelte = extract_svelte_fragment(root, provenance)
+    frag_nodes = ts.nodes + js.nodes + svelte.nodes
+    frag_edges = ts.edges + js.edges + svelte.edges
+    # SvelteKit routing pass: promote +-prefixed routing files (over the already-
+    # extracted FILE + handler FUNCTION nodes) into Route/Endpoint/Layout/Hook and
+    # stamp server_only on the FILE nodes it owns. The ts/svelte fragments above are
+    # NOT diverted — handler FUNCTIONs / component scripts stay extracted. finalize_ir
+    # passes the new non-IMPORTS routing edges through untouched.
+    route_nodes, route_edges = extract_sveltekit_routes(frag_nodes, provenance)
     return finalize_ir(
-        ts.nodes + js.nodes + svelte.nodes,
-        ts.edges + js.edges + svelte.edges,
+        frag_nodes + route_nodes,
+        frag_edges + route_edges,
         repo_name or root.name,
         provenance,
     )

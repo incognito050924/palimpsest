@@ -31,12 +31,20 @@ from palimpsest.ir import (
     FUNCTION,
     VARIABLE,
     COMMUNITY,
+    ROUTE,
+    ENDPOINT,
+    LAYOUT,
+    HOOK,
     CONTAINS,
     IMPORTS,
     CALLS,
     DEPENDS_ON,
     MEMBER_OF,
     MODIFIES,
+    REALIZES,
+    HANDLES,
+    LOADS,
+    GUARDS,
     SUMMARY,
     RISK,
     DESIGN_DECISION,
@@ -59,13 +67,17 @@ CAPTURE_MANIFEST = "CaptureManifest"
 NODE_LABELS = [
     REPO, PACKAGE, FILE, CLASS, METHOD, FUNCTION, VARIABLE, "Episode", SUMMARY,
     COMMUNITY, RISK, DESIGN_DECISION, CAPTURE_MANIFEST,
+    ROUTE, ENDPOINT, LAYOUT, HOOK,
 ]
 # MODIFIES is a deterministic rel type, but it is written by a DEDICATED loader
 # (``ingest_modifies``), never the generic ``_REL_MERGE`` path: its src is a bare
 # Episode (a commit SHA) that lives OUTSIDE ``ir.nodes``, so ``ingest``'s
 # ``id_to_label`` map has no entry for it and the generic path would silently drop
 # every MODIFIES edge. Listed here for the ontology registry only.
-REL_TYPES = [CONTAINS, IMPORTS, CALLS, DEPENDS_ON, MEMBER_OF, MODIFIES]
+REL_TYPES = [
+    CONTAINS, IMPORTS, CALLS, DEPENDS_ON, MEMBER_OF, MODIFIES,
+    REALIZES, HANDLES, LOADS, GUARDS,
+]
 
 # A MERGE-on-id per label; property SET is uniform (unused props resolve to
 # null, which Neo4j drops — Repo/Package simply carry no path/line grounding).
@@ -79,6 +91,7 @@ SET n.name          = row.name,
     n.start_line    = row.start_line,
     n.end_line      = row.end_line,
     n.is_test       = row.is_test,
+    n.server_only   = row.server_only,
     n.source_commit = row.source_commit,
     n.author        = row.author,
     n.committed_at  = row.committed_at,
@@ -220,6 +233,9 @@ def _node_row(node) -> dict:
         # test-impact marker (ADR-20260706 §결정6); null for non-marked labels
         # (Repo/Package/Community/... + non-Java) -> Neo4j drops the property.
         "is_test": node.is_test,
+        # SvelteKit routing server-only marker; null for non-routing nodes ->
+        # Neo4j drops the property (additive, never a phantom-false).
+        "server_only": node.server_only,
         "source_commit": p.source_commit,
         "author": p.author,
         "committed_at": p.committed_at,

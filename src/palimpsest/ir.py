@@ -57,6 +57,14 @@ VARIABLE = "Variable"
 # A Community groups Classes that form a connected component at the Class level
 # (via cross-class CALLS / DEPENDS_ON) — a deterministic, rebuild-stable partition.
 COMMUNITY = "Community"
+# SvelteKit routing ontology kinds (deterministic structural). A Route is a page
+# route whose URL pattern is its identity (e.g. "/blog/[slug]"); an Endpoint is a
+# server request handler (e.g. "GET /api/x"); a Layout is a nested layout shell;
+# a Hook is a request-lifecycle hook (hooks.server.ts).
+ROUTE = "Route"
+ENDPOINT = "Endpoint"
+LAYOUT = "Layout"
+HOOK = "Hook"
 
 # Edge kinds (deterministic structural ontology)
 CONTAINS = "CONTAINS"
@@ -72,6 +80,16 @@ MEMBER_OF = "MEMBER_OF"
 # generic node/edge path), and deliberately absent from recall's traversal
 # whitelist so a churn edge never drags an author-bearing Episode into items.
 MODIFIES = "MODIFIES"
+
+# SvelteKit routing ontology edges (deterministic structural), distinct from the
+# generic structural set above: a File REALIZES the Route/Endpoint/Layout it
+# defines; a Function HANDLES an Endpoint (its request handler); a Function LOADS
+# a Route/Layout (its load() data function); a Hook GUARDS the Endpoint/Route it
+# gates.
+REALIZES = "REALIZES"
+HANDLES = "HANDLES"
+LOADS = "LOADS"
+GUARDS = "GUARDS"
 
 # Inferred semantic layer: externally-generated summaries (palimpsest is
 # provider-free — it never calls an LLM; a summary is produced elsewhere and
@@ -157,6 +175,11 @@ class Node:
     # else None. A pure PROPERTY — deliberately OFF ``id``/``branch_scoped_id`` so it
     # never perturbs node identity; ``scope_to_branch``'s ``replace`` preserves it.
     is_test: Optional[bool] = None
+    # SvelteKit routing marker: True on a server-only node (a +page.server.ts /
+    # +server.ts module, hooks.server.ts), else None. Like ``is_test`` a pure
+    # PROPERTY — deliberately OFF ``id``/``branch_scoped_id`` so it never perturbs
+    # node identity; ``scope_to_branch``'s ``replace`` preserves it.
+    server_only: Optional[bool] = None
 
     @property
     def id(self) -> str:
@@ -171,6 +194,7 @@ class Node:
             "start_line": self.start_line,
             "end_line": self.end_line,
             "is_test": self.is_test,
+            "server_only": self.server_only,
             "provenance": self.provenance.to_dict(),
         }
 
