@@ -3,7 +3,8 @@
 Two stdlib-argparse subcommands wire the deterministic slice end to end:
 
   ingest --repo PATH [--commit HEAD]
-      Extract the Java tree under PATH + read git provenance for the pinned
+      Extract the source tree under PATH (every language present — Java/Kotlin/
+      Python/Rust/ECMAScript, routed by extension) + read git provenance for the pinned
       commit, then create_constraints + ingest the IR into Neo4j.
 
   backfill --repo PATH
@@ -337,9 +338,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_ing = sub.add_parser(
-        "ingest", help="extract a Java tree + provenance and ingest into Neo4j"
+        "ingest", help="extract a source tree (any language) + provenance and ingest into Neo4j"
     )
-    p_ing.add_argument("--repo", required=True, help="path to the Java repository root")
+    p_ing.add_argument("--repo", required=True, help="path to the repository root")
     p_ing.add_argument(
         "--commit", default="HEAD", help="git commit to pin provenance to (default HEAD)"
     )
@@ -349,7 +350,7 @@ def build_parser() -> argparse.ArgumentParser:
         "backfill",
         help="replay extract+ingest over the FULL git history (every commit)",
     )
-    p_bf.add_argument("--repo", required=True, help="path to the Java repository root")
+    p_bf.add_argument("--repo", required=True, help="path to the repository root")
     p_bf.set_defaults(func=_cmd_backfill)
 
     p_q = sub.add_parser(
