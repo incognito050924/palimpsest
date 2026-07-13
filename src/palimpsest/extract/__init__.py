@@ -15,6 +15,7 @@ from palimpsest.ir import IR, Provenance
 from palimpsest.extract.java import extract as extract_java
 from palimpsest.extract.kotlin import extract as extract_kotlin
 from palimpsest.extract.python import extract as extract_python
+from palimpsest.extract.rust import extract as extract_rust
 from palimpsest.extract.typescript import extract as extract_typescript, TS_PROFILES
 from palimpsest.extract.javascript import extract as extract_javascript, JS_PROFILES
 from palimpsest.extract.svelte import (
@@ -57,6 +58,7 @@ EXTRACTORS_BY_EXT = {
     ".java": extract_java,
     ".kt": extract_kotlin,
     ".py": extract_python,
+    ".rs": extract_rust,
     ".ts": extract_typescript,
     ".tsx": extract_typescript,
     ".js": extract_javascript,
@@ -69,6 +71,7 @@ __all__ = [
     "extract_java",
     "extract_kotlin",
     "extract_python",
+    "extract_rust",
     "extract_typescript",
     "extract_javascript",
     "extract_svelte",

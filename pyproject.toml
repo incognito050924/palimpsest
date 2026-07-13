@@ -17,6 +17,10 @@ dependencies = [
     # matches the tree-sitter>=0.23 runtime split API / ABI (per-language grammar
     # + queries/python/*.scm).
     "tree-sitter-python>=0.23",
+    # Static Rust extraction -> IR (issue #12). Same tree-sitter runtime; per-language
+    # grammar + queries/rust/*.scm (ADR-20260706 §결정6). de-Class'd: struct/enum/trait
+    # -> Class, free fn -> Function, impl/trait method -> Method.
+    "tree-sitter-rust>=0.23",
     # Static TS/JS/React/Svelte extraction -> IR (wi_260713lom). Shared
     # ecmascript core over per-grammar tree-sitter bindings; each grammar owns its
     # queries/<lang>/*.scm (ADR-20260706 §결정6). tsx grammar parses .tsx, the
