@@ -51,6 +51,9 @@ METHOD = "Method"
 # A module-level function (no declaring class) — a first-class callable symbol
 # distinct from METHOD. Participates in the same deterministic CALLS ontology.
 FUNCTION = "Function"
+# A named variable symbol (module- or class-level binding). Carries only the
+# variable NAME as identity — no literal value field on the Node dataclass.
+VARIABLE = "Variable"
 # A Community groups Classes that form a connected component at the Class level
 # (via cross-class CALLS / DEPENDS_ON) — a deterministic, rebuild-stable partition.
 COMMUNITY = "Community"

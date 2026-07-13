@@ -1,0 +1,6 @@
+# ditto recipe — project configuration
+# barrier_test_command: side-effect-free unit subset run as the in-loop settled-tree
+# barrier during autopilot. MUST stay infra-free (no live DB/network/shared fixtures).
+# Only tests/extract qualifies — every other test dir (kg, recall, reconcile, backfill,
+# curate, e2e) spins a live Neo4j via testcontainers and must NOT be a barrier oracle.
+barrier_test_command: .venv/bin/python -m pytest tests/extract -q

@@ -29,6 +29,7 @@ from palimpsest.ir import (
     CLASS,
     METHOD,
     FUNCTION,
+    VARIABLE,
     COMMUNITY,
     CONTAINS,
     IMPORTS,
@@ -56,8 +57,8 @@ from palimpsest.ir import (
 CAPTURE_MANIFEST = "CaptureManifest"
 
 NODE_LABELS = [
-    REPO, PACKAGE, FILE, CLASS, METHOD, FUNCTION, "Episode", SUMMARY, COMMUNITY,
-    RISK, DESIGN_DECISION, CAPTURE_MANIFEST,
+    REPO, PACKAGE, FILE, CLASS, METHOD, FUNCTION, VARIABLE, "Episode", SUMMARY,
+    COMMUNITY, RISK, DESIGN_DECISION, CAPTURE_MANIFEST,
 ]
 # MODIFIES is a deterministic rel type, but it is written by a DEDICATED loader
 # (``ingest_modifies``), never the generic ``_REL_MERGE`` path: its src is a bare
