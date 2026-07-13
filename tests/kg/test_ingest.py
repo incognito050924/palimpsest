@@ -232,6 +232,46 @@ def test_function_nodes_and_calls_edge_roundtrip(clean_db):
     assert calls == [{"src": alpha_qn, "dst": beta_qn, "kind": "deterministic"}]
 
 
+def test_is_test_marker_persisted_on_node_write(clean_db):
+    """AC-1 (persistence): the is_test test-impact marker rides the generic node
+    write. A node stamped ``is_test=True`` re-queries as ``n.is_test = true``; an
+    unmarked (production) node has NO is_test property at all — null is dropped by
+    Neo4j, so the additive marker never phantoms a false property onto every node.
+    """
+    prov = Provenance(
+        source_commit="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        author="fixture <fixture@example.com>",
+        committed_at="2026-07-13T00:00:00+09:00",
+    )
+    ir = IR(
+        nodes=[
+            Node(kind=CLASS, qualified_name="p.WidgetTest", name="WidgetTest",
+                 provenance=prov, path="src/test/java/p/WidgetTest.java",
+                 start_line=1, end_line=9, is_test=True),
+            Node(kind=CLASS, qualified_name="p.Widget", name="Widget",
+                 provenance=prov, path="src/main/java/p/Widget.java",
+                 start_line=1, end_line=5),  # production -> is_test defaults None
+        ],
+        edges=[],
+    )
+
+    from palimpsest.kg import ingest
+
+    ingest(clean_db, ir)
+
+    with clean_db.session() as session:
+        marked = session.run(
+            "MATCH (c:Class {id: $id}) RETURN c.is_test AS t", id="p.WidgetTest"
+        ).single()["t"]
+        prod = session.run(
+            "MATCH (c:Class {id: $id}) RETURN c.is_test AS t, 'is_test' IN keys(c) AS has",
+            id="p.Widget",
+        ).single()
+    assert marked is True                 # marker persisted on the test node
+    assert prod["t"] is None              # production node: property is null
+    assert prod["has"] is False           # ...i.e. dropped, not a phantom false
+
+
 def _plan_operators(plan) -> list:
     """Flatten a Neo4j EXPLAIN plan tree into a flat list of operator types."""
     ops = [plan["operatorType"]]

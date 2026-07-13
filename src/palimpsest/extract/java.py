@@ -108,6 +108,40 @@ def _package_fqn(root: TSNode) -> str:
     return ""
 
 
+# --- test-impact marker (ADR-20260706 §결정6) --------------------------------
+# A File/Class/Method node is test code if ANY of three deterministic signals
+# holds (Java surface only): the file lives under ``src/test``, the file imports
+# junit, or a declaration carries an ``@Test`` annotation. The marker is a node
+# PROPERTY (never identity) — see ``ir.Node.is_test``.
+
+def _is_test_path(rel_path: str) -> bool:
+    """True iff ``rel_path`` runs through a ``src/test`` segment pair (Maven/Gradle
+    test-source layout), e.g. ``src/test/...`` or ``mod/src/test/...`` — but not a
+    coincidental substring like ``foo_src/test``."""
+    parts = rel_path.split("/")
+    return any(parts[i] == "src" and parts[i + 1] == "test" for i in range(len(parts) - 1))
+
+
+def _is_junit_import(target: str) -> bool:
+    """True for a junit import target: ``org.junit`` / ``org.junit.jupiter.*`` (junit
+    4 & 5) or ``junit.framework.*`` (junit 3)."""
+    return target.startswith("org.junit") or target.startswith("junit.")
+
+
+def _has_test_annotation(decl_node: TSNode) -> bool:
+    """True if a class/method declaration carries an ``@Test`` annotation (bare
+    ``@Test``, ``@Test(...)``, or fully-qualified ``@org.junit.Test``)."""
+    for child in decl_node.named_children:
+        if child.type != "modifiers":
+            continue
+        for ann in child.named_children:
+            if ann.type in ("marker_annotation", "annotation"):
+                name = ann.child_by_field_name("name")
+                if name is not None and name.text.decode().split(".")[-1] == "Test":
+                    return True
+    return False
+
+
 class _FileWalker:
     """Collects nodes + edges for a single parsed Java file."""
 
@@ -128,6 +162,9 @@ class _FileWalker:
         # simple names of single-type imports in this file (attributed to its classes)
         self.import_simple: set[str] = set()
         self.file_classes: list[str] = []
+        # test-impact signals accumulated over the walk (see _is_test_path etc.).
+        self.imports_junit = False
+        self.has_test_annotation = False
 
     def _edge(self, kind: str, src: str, dst: str) -> None:
         self.edges.append(Edge(kind=kind, src=src, dst=dst, provenance=self.prov))
@@ -156,6 +193,12 @@ class _FileWalker:
         # imported types count as dependencies of every class declared in the file
         for fqn in self.file_classes:
             self.class_refs[fqn].update(self.import_simple)
+        # File-level test-impact marker: stamp every File/Class/Method node this file
+        # produced. is_test is a property (not identity), so post-hoc mutation of the
+        # already-collected nodes is safe. Production (no signal) stays None.
+        if _is_test_path(self.rel_path) or self.imports_junit or self.has_test_annotation:
+            for n in self.nodes:
+                n.is_test = True
 
     def _import_decl(self, node: TSNode) -> None:
         target = None
@@ -169,12 +212,16 @@ class _FileWalker:
             self._edge(IMPORTS, self.rel_path, target)
             if not wildcard:
                 self.import_simple.add(target.split(".")[-1])
+            if _is_junit_import(target):
+                self.imports_junit = True
 
     def _type_decl(self, node: TSNode, enclosing_fqn: str | None, container_id: str) -> None:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return
         name = name_node.text.decode()
+        if _has_test_annotation(node):
+            self.has_test_annotation = True
         if enclosing_fqn:
             fqn = f"{enclosing_fqn}.{name}"
         elif self.pkg:
@@ -217,6 +264,8 @@ class _FileWalker:
         if name_node is None:
             return
         name = name_node.text.decode()
+        if _has_test_annotation(node):
+            self.has_test_annotation = True
         param_type_names = _param_types(node)
         params = ",".join(param_type_names)
         fqn = f"{class_fqn}#{name}({params})"

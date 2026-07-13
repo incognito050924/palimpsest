@@ -1094,3 +1094,165 @@ def recall_cochange(driver, file_id, limit=25):
         it["cochange"] = rec["cochange"]
     gaps = [] if items else [f"file '{file_id}' has no co-changed files"]
     return _result(items, gaps, None, [])
+
+
+# ── test-impact: the backward-CALLS recall channel (#7) ───────────────────────
+# "Which tests exercise this changed production Method?" A dedicated, read-only entry
+# point that walks CALLS BACKWARD (seed <- caller) to the test Methods that transitively
+# call the seed. Deliberately a PER-HOP bounded BFS (mirrors recall's _hop), NOT a
+# variable-length [:CALLS*1..depth] path: a var-length path bounds only OUTPUT rows,
+# not COMPUTE — a hot method explodes it (regressing the fix-#6 traversal bound) and it
+# is not rebuild-deterministic. Here each hop's read is server-bounded, id-ordered
+# before LIMIT, and per-frontier-node fan-out capped, so COMPUTE itself is bounded.
+
+# Per-hop fan-out cap: a hot production Method may be called by a huge number of test
+# Methods; this bounds the callers ONE frontier node contributes per hop so a single
+# high-degree seed never explodes the backward traversal (mirrors _COCHANGE_FANOUT_CAP;
+# a threshold that must exist gets a named constant, never a magic literal in the query).
+_TEST_IMPACT_FANOUT_CAP = 512
+
+# One backward-CALLS hop: ALL callers of a frontier of Methods. CALLS is walked BACKWARD
+# (caller -[:CALLS]-> callee={frontier}) with NO is_test filter — production intermediaries
+# MUST be traversed THROUGH: a ``test -> production_helper -> seed`` chain (the dominant
+# far/indirect case) is only found if the production helper stays in the frontier for the
+# next hop. So the frontier expands through EVERY caller, and the is_test partition happens
+# in Python (:func:`_test_impact_hop`): test callers (is_test=true) become answers, production
+# callers are stepping-stones. ``caller.is_test`` is projected so that partition is possible
+# (a plain PROPERTY read — never a whole-node projection). DISTINCT dedups a caller reached
+# from several frontier nodes; per-node fan-out is capped server-side; the whole result is
+# id-ordered before LIMIT for rebuild-determinism. The caller Method is projected by the
+# CALLER through _item/_sources (author-omitted) — this query NEVER returns a whole node, so
+# the per-node author (stamped on every Method) can not leak.
+_TEST_CALLERS = """
+UNWIND $ids AS sid
+CALL {
+    WITH sid
+    MATCH (callee {id: sid})<-[:CALLS]-(caller)
+    RETURN caller ORDER BY caller.id LIMIT $fanout
+}
+RETURN DISTINCT caller.id AS id, caller.is_test AS is_test,
+       labels(caller) AS labels, caller.name AS name,
+       caller.qualified_name AS qualified_name,
+       caller.path AS path, caller.start_line AS start_line, caller.end_line AS end_line,
+       caller.source_commit AS source_commit, caller.committed_at AS committed_at
+ORDER BY id
+LIMIT $lim
+"""
+
+# Standing gap (ac-3 honesty), ALWAYS emitted: static CALLS is a LOWER BOUND on the
+# impacted tests. It cannot see reflective / dependency-injection / polymorphic-dispatch
+# test callers, so an empty or short result must NOT be read as "no tests impacted" —
+# completeness is never claimed on this channel.
+_STATIC_LOWER_BOUND_GAP = (
+    "static CALLS is a lower bound: reflective / DI / polymorphic-dispatch test "
+    "callers are invisible to it, so an empty or short result does NOT mean 'no tests "
+    "impacted' — completeness is not claimed"
+)
+
+
+def _test_impact_reingest_gap(seed_id) -> str:
+    """The DISTINCT zero-coverage gap: when the backward traversal finds no is_test
+    caller, advise a re-ingest so a graph that PREDATES the is_test marker (every node
+    lacks it) is not silently read as 'this seed has no test callers'."""
+    return (
+        f"no is_test test caller found for '{seed_id}' via static CALLS; if unexpected, "
+        "the graph may predate the is_test marker — re-ingest to populate is_test before "
+        "reading this as 'no test callers'"
+    )
+
+
+def _test_callers(driver, ids, limit):
+    """Backward-CALLS callers of a frontier — ALL of them (production intermediaries AND
+    test callers; each row carries ``is_test`` so the caller partitions them). Rows only;
+    projection is the caller's job via _item/_sources. ``limit`` is a server-side row bound
+    (Cypher LIMIT after ORDER BY) and per-node fan-out is capped, so a hot seed never streams
+    its whole caller set to the client."""
+    with driver.session() as session:
+        rows = session.run(
+            _TEST_CALLERS, ids=list(ids), lim=limit, fanout=_TEST_IMPACT_FANOUT_CAP
+        )
+        return [r.data() for r in rows]
+
+
+def _test_impact_hop(driver, frontier, visited, depth, budget):
+    """One backward-CALLS BFS hop. The frontier expands through ALL backward callers —
+    a production intermediary is a stepping-stone kept in ``emitted`` for the next hop — while
+    ONLY ``is_test=true`` callers are collected as result ``items``. That split is the fix for
+    the far/indirect case (``test -> production_helper -> seed``): the production helper is
+    traversed THROUGH instead of pruned, so the distant test reaching the seed through it is
+    found. Emits up to ``budget`` new test items (deterministic id order). Returns
+    (items, emitted_ids, truncated). Mirrors :func:`_hop`: the server read is bounded to
+    ``budget + |visited| + 1`` rows."""
+    items, emitted = [], []
+    truncated = False
+    read_limit = budget + len(visited) + 1
+    for rec in _test_callers(driver, frontier, read_limit):
+        nid = rec["id"]
+        if nid in visited:
+            continue
+        if len(items) >= budget:
+            truncated = True
+            break
+        visited.add(nid)
+        emitted.append(nid)             # EVERY caller advances the frontier (production + test)
+        if rec.get("is_test"):          # only test callers are answers; production ones step through
+            items.append(_item(rec, CALLS, depth))
+    return items, emitted, truncated
+
+
+def recall_test_impact(driver, method_id, depth=10, limit=25):
+    """Recall the test Methods that transitively call a production Method (#7).
+
+    A SEPARATE, read-only entry point. ``method_id`` is the changed production Method
+    node id (the seed). Walks ``CALLS`` BACKWARD (seed <- caller) hop by hop — a per-hop
+    bounded BFS mirroring :func:`recall`, NOT a variable-length ``[:CALLS*1..depth]``
+    path — expanding the frontier through ALL backward callers (production intermediaries
+    included) while collecting ONLY ``is_test=true`` callers as ``items``. So the returned
+    items are the test Methods reaching the seed directly (1 hop) or TRANSITIVELY through a
+    helper chain (>1 hop) — and the intermediaries may be PRODUCTION code (the dominant
+    far/indirect case: ``test -> production_helper -> seed``, which a per-hop is_test filter
+    on the frontier would silently lose). DISTINCT-deduped across call paths. Same bounded
+    ``{items, sources, summaries, gaps, confidence, expand_handle}`` shape as the sibling
+    channels; the test Methods are the grounded ``items`` (commit + file:line via
+    :func:`_sources`, author-omitted — never a whole-node projection). Combinatorial only
+    (bounded CALLS traversal + dict building), no LLM.
+
+    Bounding (ac-3 — COMPUTE, not just output rows): each hop reads at most
+    ``budget + |visited| + 1`` server-side rows, per-frontier-node fan-out is capped at
+    ``_TEST_IMPACT_FANOUT_CAP``, total items are bounded by ``limit``, and callers are
+    id-ordered before the LIMIT for rebuild-determinism — so a hot seed never explodes
+    and the result is run-stable. ``depth`` is the transitive-hop ceiling (``limit`` is
+    the real item bound); ``depth <= 0`` degrades gracefully to a seed-only (empty)
+    result.
+
+    Gaps (ac-3 honesty): the static-lower-bound note is ALWAYS present (static CALLS
+    misses reflective / DI / polymorphic-dispatch callers); when NO test caller is found,
+    a DISTINCT re-ingest advisory is added so a graph predating the is_test marker is not
+    mistaken for 'no test callers'. Completeness is never claimed.
+    """
+    gaps = [_STATIC_LOWER_BOUND_GAP]
+
+    seed = _resolve(driver, method_id)
+    if seed is None:
+        gaps.append(f"seed '{method_id}' did not resolve to any node in the graph")
+        return _result([], gaps, None, [])
+
+    items = []
+    visited = {seed["id"]}
+    frontier = [seed["id"]]
+    cur_depth = 0
+    while frontier and cur_depth < depth and len(items) < limit:
+        cur_depth += 1
+        new_items, emitted, truncated = _test_impact_hop(
+            driver, frontier, visited, cur_depth, limit - len(items)
+        )
+        items.extend(new_items)
+        if truncated:
+            # Item budget spent mid-level; the top-``limit`` id-ordered test callers are
+            # returned (a bounded answer — this channel does not page beyond ``limit``).
+            break
+        frontier = emitted  # next hop expands from the callers just found
+
+    if not items:
+        gaps.append(_test_impact_reingest_gap(seed["id"]))
+    return _result(items, gaps, None, [])

@@ -78,6 +78,7 @@ SET n.name          = row.name,
     n.path          = row.path,
     n.start_line    = row.start_line,
     n.end_line      = row.end_line,
+    n.is_test       = row.is_test,
     n.source_commit = row.source_commit,
     n.author        = row.author,
     n.committed_at  = row.committed_at,
@@ -216,6 +217,9 @@ def _node_row(node) -> dict:
         "path": node.path,
         "start_line": node.start_line,
         "end_line": node.end_line,
+        # test-impact marker (ADR-20260706 §결정6); null for non-marked labels
+        # (Repo/Package/Community/... + non-Java) -> Neo4j drops the property.
+        "is_test": node.is_test,
         "source_commit": p.source_commit,
         "author": p.author,
         "committed_at": p.committed_at,

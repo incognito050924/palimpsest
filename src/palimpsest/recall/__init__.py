@@ -15,6 +15,7 @@ from palimpsest.recall.graphrag import (
     recall_semantic,
     recall_churn,
     recall_cochange,
+    recall_test_impact,
     reconcile_recall,
     expand,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "recall_semantic",
     "recall_churn",
     "recall_cochange",
+    "recall_test_impact",
     "reconcile_recall",
     "expand",
 ]

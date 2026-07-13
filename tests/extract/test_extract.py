@@ -241,6 +241,124 @@ def test_provenance_attached_to_every_node_and_edge(ir):
     json.dumps(d)  # must not raise
 
 
+# --- is_test marker (test-impact, ADR-20260706 §결정6) ------------------------
+# A SEPARATE corpus from ``fixtures/`` (that tree's 28-node count is hard-coded by
+# tests/recall + tests/e2e — see impl-marker packet). Production under src/main, a
+# DIRECT test caller and an INDIRECT (via helper) test caller under src/test, each
+# with @Test + a junit import, so a later recall node can observe both caller kinds.
+TEST_IMPACT_FIXTURES = Path(__file__).parent / "fixtures_test_impact"
+
+
+@pytest.fixture(scope="module")
+def ti_ir():
+    return extract(TEST_IMPACT_FIXTURES, PROV, repo_name="TestImpact")
+
+
+def _under_src_test(path) -> bool:
+    parts = (path or "").split("/")
+    return any(parts[i] == "src" and parts[i + 1] == "test" for i in range(len(parts) - 1))
+
+
+def test_is_test_marker_precision_zero_misclassification(ti_ir):
+    # AC-1: File/Class/Method nodes under src/test (marked by path/@Test/junit) are
+    # is_test=True; src/main production nodes are falsy. 0 misclassification. Ground
+    # truth here is the src/test vs src/main split of the corpus.
+    code = [n for n in ti_ir.nodes if n.kind in (FILE, CLASS, METHOD)]
+    assert code  # guard the fixture assumption
+    misclassified = [
+        (n.kind, n.qualified_name, _under_src_test(n.path), bool(n.is_test))
+        for n in code
+        if bool(n.is_test) != _under_src_test(n.path)
+    ]
+    assert misclassified == [], misclassified
+    # both classes present (a positive AND a negative), else "0 misclassification"
+    # could be vacuously true.
+    assert any(n.is_test for n in code)      # at least one test node
+    assert any(not n.is_test for n in code)  # at least one production node
+    # The marker is a File/Class/Method concern only — Repo/Package never marked.
+    for n in ti_ir.nodes:
+        if n.kind not in (FILE, CLASS, METHOD):
+            assert not n.is_test, (n.kind, n.qualified_name)
+
+
+def test_is_test_marker_from_junit_import_signal(tmp_path):
+    # The junit-import signal ALONE classifies: a file NOT under src/test and with
+    # NO @Test, but importing junit, is a test file.
+    ir = _extract_ir(tmp_path, {
+        "app/JunitOnly.java": (
+            "package app;\n"
+            "import org.junit.Assert;\n"
+            "public class JunitOnly {\n"
+            "  public void check() { Assert.assertTrue(true); }\n"
+            "}\n"
+        ),
+    })
+    nodes = [n for n in ir.nodes if n.kind in (FILE, CLASS, METHOD)]
+    assert nodes
+    assert all(n.is_test for n in nodes), [(n.kind, n.is_test) for n in nodes]
+
+
+def test_is_test_marker_from_test_annotation_signal(tmp_path):
+    # The @Test-annotation signal ALONE classifies: a file NOT under src/test and
+    # with NO junit import, but a method carrying @Test, is a test file.
+    ir = _extract_ir(tmp_path, {
+        "app/AnnotatedOnly.java": (
+            "package app;\n"
+            "public class AnnotatedOnly {\n"
+            "  @Test\n"
+            "  public void t() {}\n"
+            "}\n"
+        ),
+    })
+    nodes = [n for n in ir.nodes if n.kind in (FILE, CLASS, METHOD)]
+    assert nodes
+    assert all(n.is_test for n in nodes), [(n.kind, n.is_test) for n in nodes]
+
+
+def test_is_test_marker_production_not_marked(tmp_path):
+    # src/main production, no marker of any kind -> all code nodes falsy.
+    ir = _extract_ir(tmp_path, {
+        "src/main/java/app/Prod.java": (
+            "package app;\npublic class Prod { public void p() {} }\n"
+        ),
+    })
+    nodes = [n for n in ir.nodes if n.kind in (FILE, CLASS, METHOD)]
+    assert nodes
+    assert all(not n.is_test for n in nodes)
+
+
+def test_is_test_is_off_identity_and_survives_scope_to_branch(tmp_path):
+    # is_test is a PROPERTY, not identity: it never enters id/branch_scoped_id, and
+    # scope_to_branch's replace() preserves it. to_dict carries it.
+    from palimpsest.ir import scope_to_branch
+
+    ir = _extract_ir(tmp_path, {
+        "src/test/java/app/T.java": (
+            "package app;\n"
+            "import org.junit.jupiter.api.Test;\n"
+            "public class T { @Test public void a() {} }\n"
+        ),
+        "src/main/java/app/P.java": (
+            "package app;\npublic class P { public void b() {} }\n"
+        ),
+    })
+    tcls = next(n for n in ir.nodes if n.kind == CLASS and n.name == "T")
+    pcls = next(n for n in ir.nodes if n.kind == CLASS and n.name == "P")
+    assert tcls.is_test is True and not pcls.is_test
+    # id is independent of is_test (branch=None -> bare qualified_name).
+    assert tcls.id == tcls.qualified_name
+    # to_dict serializes the marker.
+    assert tcls.to_dict()["is_test"] is True
+    assert pcls.to_dict()["is_test"] is None
+
+    scoped = scope_to_branch(ir, "feature/x")
+    s_tcls = next(n for n in scoped.nodes if n.kind == CLASS and n.name == "T")
+    s_pcls = next(n for n in scoped.nodes if n.kind == CLASS and n.name == "P")
+    assert s_tcls.branch == "feature/x"
+    assert s_tcls.is_test is True      # preserved across the branch fold
+    assert not s_pcls.is_test
+
+
 def test_read_provenance_from_git(tmp_path):
     import subprocess
 

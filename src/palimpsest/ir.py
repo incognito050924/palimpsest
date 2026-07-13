@@ -152,6 +152,11 @@ class Node:
     # single-branch plane. Set by ``scope_to_branch``; persisted as a node
     # property (the GC discriminator).
     branch: Optional[str] = None
+    # Deterministic test-impact marker (ADR-20260706 §결정6): True on File/Class/
+    # Method nodes classified as test code (src/test path / @Test / junit import),
+    # else None. A pure PROPERTY — deliberately OFF ``id``/``branch_scoped_id`` so it
+    # never perturbs node identity; ``scope_to_branch``'s ``replace`` preserves it.
+    is_test: Optional[bool] = None
 
     @property
     def id(self) -> str:
@@ -165,6 +170,7 @@ class Node:
             "path": self.path,
             "start_line": self.start_line,
             "end_line": self.end_line,
+            "is_test": self.is_test,
             "provenance": self.provenance.to_dict(),
         }
 
