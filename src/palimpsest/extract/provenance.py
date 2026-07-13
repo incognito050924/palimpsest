@@ -75,3 +75,58 @@ def changed_paths(repo_path: Path | str, commit: str = "HEAD") -> list[str]:
             f"{len(tokens)} tokens"
         )
     return [tokens[i + 1] for i in range(0, len(tokens), 2)]
+
+
+# ---------------------------------------------------------------------------
+# Cross-tier CALLS_API link transform-provenance (wi_260713iah, part 2).
+#
+# A cross-tier link's route is either read DIRECTLY at the call site (a literal) or
+# DERIVED through a resolution step (one-hop param->uri dataflow, a dev-proxy rewrite,
+# or @Value config host-grounding). A derived route is a weaker signal than a literal
+# direct-match: it can NEVER carry the literal 1.0 confidence tier, and a derived
+# resolution that is not provably unique (>1 matching context/binding) is capped harder
+# still (the foreign-runtime-fidelity finding). This is the provenance model + the
+# confidence CAP the matcher (extract/calls_api.py) applies. Kept here (not in ir.py)
+# so the base module stays free of link-scoring policy; imported by the matcher only.
+# ---------------------------------------------------------------------------
+
+# The route was read DIRECTLY as a literal at the call site — the strongest, 1.0-eligible
+# signal (no transform cap).
+LITERAL = "literal"
+# The route was RECOVERED by one-hop param->uri dataflow (a helper-passed URL).
+DATAFLOW = "dataflow"
+# The route was rewritten by a dev-proxy prefix mapping (mechanism A).
+PROXY = "proxy"
+# The target host was resolved from @Value config grounding (mechanism B).
+CONFIG = "config"
+
+# The DERIVED transforms — a link built on any of these is not a plain literal
+# direct-match, so it is capped below the literal 1.0 tier.
+DERIVED = frozenset({DATAFLOW, PROXY, CONFIG})
+
+# Confidence cap for a derived link whose resolution IS provably unique (single
+# matching context) — below the literal 1.0, at the templated tier: a recovered /
+# rewritten / grounded route is at best as trustworthy as a templated literal match.
+DERIVED_CAP = 0.7
+# Cap for a derived link whose resolution is NOT provably unique (>1 matching
+# context/binding) — the weakest positive signal.
+AMBIGUOUS_CAP = 0.4
+
+
+def is_derived(transform: str) -> bool:
+    """Whether ``transform`` names a DERIVED resolution (vs a literal direct-match)."""
+    return transform in DERIVED
+
+
+def transform_confidence_cap(transform: str, unique: bool) -> float:
+    """The upper bound a link's confidence may take, given how its route was resolved.
+
+    A literal direct-match has no transform cap (1.0 stays reachable). A derived link
+    (dataflow / proxy / config) is capped to :data:`DERIVED_CAP`; if additionally its
+    resolution is not provably unique (>1 matching context/binding), it is capped to
+    :data:`AMBIGUOUS_CAP`."""
+    if transform not in DERIVED:
+        return 1.0
+    return DERIVED_CAP if unique else AMBIGUOUS_CAP
+
+

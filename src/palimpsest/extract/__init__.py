@@ -29,6 +29,7 @@ from palimpsest.extract.ecmascript import extract_fragment, finalize_ir
 from palimpsest.extract.sveltekit import extract_sveltekit_routes
 from palimpsest.extract.calls_api import CallEndpointMatch, RouteEnd, match_calls
 from palimpsest.extract.provenance import changed_paths, read_provenance
+from palimpsest.extract.proxy_config import ProxyRewrite, read_proxy_rewrite
 
 # Backward-compatible default: `extract` remains the Java extractor.
 extract = extract_java
@@ -166,4 +167,6 @@ __all__ = [
     "RouteEnd",
     "read_provenance",
     "changed_paths",
+    "read_proxy_rewrite",
+    "ProxyRewrite",
 ]

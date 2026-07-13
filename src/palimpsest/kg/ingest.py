@@ -94,6 +94,7 @@ SET n.name          = row.name,
     n.is_test       = row.is_test,
     n.server_only   = row.server_only,
     n.role          = row.role,
+    n.dataflow_derived = row.dataflow_derived,
     n.source_commit = row.source_commit,
     n.author        = row.author,
     n.committed_at  = row.committed_at,
@@ -241,6 +242,10 @@ def _node_row(node) -> dict:
         # Spring DI/stereotype role (Decision 6); null for non-Class / unmarked
         # nodes -> Neo4j drops the property (additive, mirrors server_only).
         "role": node.role,
+        # One-hop dataflow-recovery marker (ac-4); True on a dataflow-recovered
+        # ApiCall, null elsewhere -> Neo4j drops the property (additive). Read back
+        # by the CALLS_API loader to discount a recovered link below literal 1.0.
+        "dataflow_derived": node.dataflow_derived,
         "source_commit": p.source_commit,
         "author": p.author,
         "committed_at": p.committed_at,

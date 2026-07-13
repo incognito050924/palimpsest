@@ -35,6 +35,11 @@ dependencies = [
     # KG ingest (n3-impl-kg-ingest). Official Neo4j driver; raw Cypher, batched
     # UNWIND + MERGE. No neo4j-graphrag (defers LLM-synthesis paths, ac-3).
     "neo4j>=5.14",
+    # Config base-url grounding (wi_260713iah, ac-5): parse a JVM module's
+    # application*.yaml to resolve a caller's @Value("${...}") base-url reference to
+    # its target service. yaml.safe_load ONLY (never the full loader) — a config file
+    # is untrusted-ish input and the full loader can construct arbitrary objects.
+    "pyyaml>=6",
 ]
 
 # Graph driver (neo4j) added at the KG-ingest spike above. vector/RAG, MCP

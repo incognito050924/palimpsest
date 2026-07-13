@@ -32,7 +32,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
-from palimpsest.ir import ANY_METHOD, canonical_match_key
+from palimpsest.ir import ANY_METHOD, canonical_match_key, route_host
+from palimpsest.extract.provenance import (
+    CONFIG,
+    LITERAL,
+    is_derived,
+    transform_confidence_cap,
+)
 
 # Method tokens the matcher treats as WILDCARDS (Decision 2e): a method-less Spring
 # @RequestMapping reduces to the ``ANY_METHOD`` sentinel ("*"), and a SvelteKit
@@ -56,6 +62,12 @@ class RouteEnd:
     qualified_name: str
     committed_at: Optional[str] = None
     source_commit: Optional[str] = None
+    # How this call's ROUTE was resolved (``extract.provenance`` transform). Defaults to
+    # LITERAL (a direct call-site literal). A one-hop dataflow-recovered call carries
+    # DATAFLOW here; a host-grounded (config-resolved) call is detected at match time from
+    # its host prefix, so it need not set this. Kept off ``id`` — it is scoring metadata,
+    # never route identity (wi_260713iah part 2).
+    transform: str = LITERAL
 
 
 @dataclass(frozen=True)
@@ -75,6 +87,14 @@ class CallEndpointMatch:
     candidate_count: int
     code_bound_at: Optional[str] = None
     source_commit: Optional[str] = None
+    # Transform-provenance of the RESOLUTION (``extract.provenance``): how the route was
+    # derived — LITERAL direct-match, DATAFLOW one-hop, PROXY rewrite, or CONFIG host
+    # grounding. A derived link is auditably distinct from a literal 1.0 match.
+    transform: str = LITERAL
+    # The absolute target host bound into a host-grounded (config) call
+    # (``http://svc:8080``), else None. Confirms WHICH service the call targets — a
+    # confidence/binding signal, never part of the match key (wi_260713iah part 3).
+    target_host: Optional[str] = None
 
 
 def _is_wildcard(method: str) -> bool:
@@ -93,13 +113,18 @@ def _is_templated(canonical_path: str) -> bool:
     return any(seg in ("{}", "{**}") for seg in canonical_path.split("/") if seg)
 
 
-def _confidence(templated: bool, wildcard_method: bool, candidate_count: int) -> float:
+def _confidence(
+    templated: bool, wildcard_method: bool, candidate_count: int, transform: str
+) -> float:
     """The Decision-4 confidence ladder, as a min() of the applicable ambiguity caps.
 
     Starts at 1.0 (exact method + literal path, single candidate) and is capped DOWN by
     each ambiguity present: a templated path (0.7), a wildcard-method match (0.4), and
     multi-candidacy (0.7 — the single-candidate 1.0 is unavailable once >1 Endpoint
-    matches). The lowest applicable cap wins.
+    matches). A DERIVED ``transform`` (wi_260713iah part 2: one-hop dataflow, dev-proxy
+    rewrite, or config host-grounding) adds its own cap — never the literal 1.0, and the
+    weakest tier when the derived resolution is not provably unique (>1 candidate). The
+    lowest applicable cap wins.
     """
     c = 1.0
     if templated:
@@ -108,6 +133,7 @@ def _confidence(templated: bool, wildcard_method: bool, candidate_count: int) ->
         c = min(c, 0.4)
     if candidate_count > 1:
         c = min(c, 0.7)
+    c = min(c, transform_confidence_cap(transform, unique=candidate_count == 1))
     return c
 
 
@@ -121,21 +147,38 @@ def _matched_method(a_method: str, e_method: str) -> str:
     return ANY_METHOD
 
 
+def _call_transform(c: RouteEnd, host: Optional[str]) -> str:
+    """The resolution transform for one call: an explicit non-literal transform on the
+    RouteEnd (e.g. DATAFLOW carried from extraction) wins; else a host-grounded call
+    (mechanism B stamped a target host) is CONFIG-derived; else a plain LITERAL."""
+    if c.transform != LITERAL:
+        return c.transform
+    if host is not None:
+        return CONFIG
+    return LITERAL
+
+
 def match_calls(
-    calls: Iterable[RouteEnd], endpoints: Iterable[RouteEnd]
+    calls: Iterable[RouteEnd], endpoints: Iterable[RouteEnd], proxy=None
 ) -> list[CallEndpointMatch]:
     """Match every ApiCall to every route-equal Endpoint, tier-agnostically (Decision 4).
 
-    Both sides reduce to ``canonical_match_key`` (method, canonical_path). A call matches
-    an endpoint when their canonical PATHS are equal and their methods match (equal, or
-    either side a wildcard). For each ApiCall the full candidate set is found first, so
-    ``candidate_count`` (N) and the multi-candidate confidence reduction are exact. Input
-    order is preserved (callers pass id-ordered rows) so the output is rebuild-stable.
+    Both sides reduce to ``canonical_match_key`` (method, canonical_path). A grounded
+    ApiCall's stamped target host is stripped from the key (part 3) — matching is on
+    method+PATH — and surfaced separately as ``target_host`` for target binding + a
+    discounted (derived) confidence (part 2). ``proxy`` (mechanism A) is applied to the
+    CALL side's key so a front-end ``/api`` call reaches the back-end route (an unevaluable
+    proxy prefix reduces to :data:`UNRESOLVABLE_ROUTE` and links to nothing). For each
+    ApiCall the full candidate set is found first, so ``candidate_count`` and the
+    multi-candidate reduction are exact. Input order is preserved (id-ordered rows) so the
+    output is rebuild-stable.
     """
     ep_keyed = [(e, canonical_match_key(e.qualified_name)) for e in endpoints]
     matches: list[CallEndpointMatch] = []
     for c in calls:
-        a_method, a_path = canonical_match_key(c.qualified_name)
+        a_method, a_path = canonical_match_key(c.qualified_name, proxy=proxy)
+        host = route_host(c.qualified_name)
+        transform = _call_transform(c, host)
         candidates = [
             (e, e_method, e_path)
             for (e, (e_method, e_path)) in ep_keyed
@@ -144,7 +187,7 @@ def match_calls(
         n = len(candidates)
         for (e, e_method, e_path) in candidates:
             wildcard = _is_wildcard(a_method) or _is_wildcard(e_method)
-            confidence = _confidence(_is_templated(e_path), wildcard, n)
+            confidence = _confidence(_is_templated(e_path), wildcard, n, transform)
             method = _matched_method(a_method, e_method)
             matches.append(
                 CallEndpointMatch(
@@ -155,6 +198,8 @@ def match_calls(
                     candidate_count=n,
                     code_bound_at=c.committed_at,
                     source_commit=c.source_commit,
+                    transform=transform,
+                    target_host=host,
                 )
             )
     return matches

@@ -89,6 +89,9 @@ def _row(node) -> dict:
         "end_line": node.end_line,
         "committed_at": node.provenance.committed_at,
         "source_commit": node.provenance.source_commit,
+        # Mirrors ingest ``_node_row`` -> ``_NODE_MERGE``: the dataflow-recovery marker
+        # persisted on the ApiCall node and read back by the loader (ac-4).
+        "dataflow_derived": node.dataflow_derived,
     }
 
 
@@ -289,6 +292,138 @@ def test_ac6_recall_discloses_static_lower_bound_gap(tmp_path):
     res2 = recall_call_endpoints(drv, "apicall:GET /nope")
     assert res2["items"] == []
     assert any("lower bound" in g.lower() for g in res2["gaps"])
+
+
+# --- wi_260713iah: host-separation + transform-provenance + confidence cap ------------
+#
+# WHY THESE EXIST (background for approver + consumer):
+#   mechanism B grounds an S2S call by stamping the RESOLVED target host into the ApiCall
+#   qualified_name (``apicall:GET http://svc:8080/api/x``). That host BINDS which service
+#   is called, but it is NOT part of the route: the peer Endpoint is host-less
+#   (``spring:GET /api/x``). So the matcher MUST reduce a grounded ApiCall to method+PATH
+#   (host stripped) to match, and use the host only for target-binding + confidence.
+#   And a link whose route was DERIVED (host-grounded / one-hop dataflow / proxy-rewritten)
+#   is NOT a plain literal direct-match — it can never carry the literal 1.0 tier, and a
+#   non-unique (>1 candidate) derived resolution is capped harder still.
+
+from palimpsest.extract.provenance import LITERAL, CONFIG, DATAFLOW, DERIVED_CAP, AMBIGUOUS_CAP
+
+
+def _re(qn, transform=LITERAL):
+    return RouteEnd(id=qn, qualified_name=qn, transform=transform)
+
+
+def test_grounded_apicall_host_stripped_matches_endpoint():
+    """part 3: a host-grounded ApiCall reduces to method+PATH and matches the host-less
+    Spring Endpoint; the host is surfaced as ``target_host`` (binding), not the route."""
+    call = _re("apicall:GET http://portal:8080/api/v1/connectors/{id}")
+    ep = _re("spring:GET /api/v1/connectors/{userId}")
+    matches = match_calls([call], [ep])
+    assert len(matches) == 1
+    m = matches[0]
+    assert m.matched_route == "GET /api/v1/connectors/{}"   # host is NOT in the match key
+    assert m.target_host == "http://portal:8080"            # host bound as target metadata
+    assert m.transform == CONFIG
+
+
+def test_config_derived_confidence_below_literal():
+    """part 2: a grounded (config-derived) link is capped BELOW a literal exact match —
+    a derived route is never stamped with the literal 1.0 tier."""
+    lit_m = match_calls([_re("apicall:GET /api/orders")], [_re("spring:GET /api/orders")])[0]
+    gr_m = match_calls(
+        [_re("apicall:GET http://svc:8080/api/orders")], [_re("spring:GET /api/orders")]
+    )[0]
+    assert lit_m.confidence == 1.0            # literal exact, single candidate
+    assert lit_m.transform == LITERAL
+    assert gr_m.transform == CONFIG
+    assert gr_m.confidence == DERIVED_CAP     # derived, provably unique -> capped, not 1.0
+    assert gr_m.confidence < lit_m.confidence
+
+
+def test_multi_candidate_derived_capped_harder():
+    """part 2: a derived link whose resolution is NOT provably unique (>1 matching
+    Endpoint context) is capped harder than a unique derived link."""
+    grounded = _re("apicall:GET http://svc:8080/api/x")
+    matches = match_calls([grounded], [_re("spring:GET /api/x"), _re("GET /api/x")])
+    assert len(matches) == 2
+    for m in matches:
+        assert m.candidate_count == 2
+        assert m.transform == CONFIG
+        assert m.confidence == AMBIGUOUS_CAP   # derived + non-unique -> weakest tier
+
+
+def test_dataflow_transform_discounted():
+    """part 2: a one-hop dataflow-recovered call (carried as an explicit transform) is
+    derived, so its link is discounted below a literal direct-match."""
+    call = _re("apicall:GET /api/v1/connectors/{}", transform=DATAFLOW)
+    ep = _re("spring:GET /api/v1/connectors/{id}")
+    m = match_calls([call], [ep])[0]
+    assert m.transform == DATAFLOW
+    assert m.confidence < 1.0
+
+
+def test_loader_writes_transform_and_target_host(tmp_path):
+    """part 2/3: the inferred edge carries the transform provenance + bound target_host so
+    a derived link is auditably distinct from a literal one on the graph."""
+    drv = _FakeDriver(
+        apicalls=[
+            {
+                "id": "apicall:GET http://svc:8080/api/orders",
+                "qualified_name": "apicall:GET http://svc:8080/api/orders",
+                "committed_at": PROV.committed_at,
+                "source_commit": PROV.source_commit,
+            }
+        ],
+        endpoints=[
+            {
+                "id": SPRING_EP_ID,
+                "qualified_name": SPRING_EP_ID,
+                "committed_at": PROV.committed_at,
+                "source_commit": PROV.source_commit,
+            }
+        ],
+    )
+    load_calls_api(drv)
+    e = drv.merged[("apicall:GET http://svc:8080/api/orders", SPRING_EP_ID)]
+    assert e["transform"] == CONFIG
+    assert e["target_host"] == "http://svc:8080"
+    assert e["confidence"] == DERIVED_CAP
+
+
+def _load_single_edge(apicall_row, endpoint_row):
+    """Run the loader over ONE ApiCall + ONE Endpoint and return the single merged edge."""
+    drv = _FakeDriver(apicalls=[apicall_row], endpoints=[endpoint_row])
+    load_calls_api(drv)
+    (edge,) = drv.merged.values()
+    return edge
+
+
+def test_dataflow_derived_literal_path_capped_below_genuine_literal():
+    """ac-4 regression (real boxwood): the engine->portal GET /api/v1/connectors/search
+    link was RECOVERED by one-hop param->uri dataflow, yet landed at conf 1.0 /
+    transform='literal' — indistinguishable from a direct-literal match. The route is
+    NON-templated, so the templated rung does not discount it; only the dataflow marker
+    (persisted on the ApiCall node, read back by the loader) can. A dataflow-recovered
+    literal path must read transform='dataflow' at <1.0, while a GENUINE direct-literal
+    call to the SAME path stays transform='literal' at 1.0."""
+    path = "/api/v1/connectors/search"       # non-templated: no {} placeholder
+    ep_id = f"spring:GET {path}"
+    ep_row = {"id": ep_id, "qualified_name": ep_id,
+              "committed_at": PROV.committed_at, "source_commit": PROV.source_commit}
+    call_id = f"apicall:GET {path}"
+    base_call = {"id": call_id, "qualified_name": call_id,
+                 "committed_at": PROV.committed_at, "source_commit": PROV.source_commit}
+
+    df_edge = _load_single_edge({**base_call, "dataflow_derived": True}, ep_row)
+    lit_edge = _load_single_edge({**base_call, "dataflow_derived": None}, ep_row)
+
+    # The dataflow-recovered link is auditably derived and never reaches the literal 1.0.
+    assert df_edge["transform"] == DATAFLOW
+    assert df_edge["confidence"] < 1.0
+    assert df_edge["confidence"] == DERIVED_CAP    # provably unique derived -> 0.7
+    # A genuine direct-literal call to the SAME non-templated path is untouched (#21).
+    assert lit_edge["transform"] == LITERAL
+    assert lit_edge["confidence"] == 1.0
 
 
 # --- package surface ------------------------------------------------------------------

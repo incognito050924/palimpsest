@@ -11,13 +11,24 @@ expand_handle}`` shape as the rest of recall. No LLM — pure graph traversal.
     endpoint this call hits).
 
 Honesty invariant (ac-6), ALWAYS emitted in ``gaps``. CALLS_API is a STATIC LOWER BOUND on
-cross-tier wiring, in two ways, so an ABSENCE is never a "this endpoint is unused" verdict:
+cross-tier wiring, in several enumerated ways, so an ABSENCE is never a "this endpoint is
+unused" verdict. The disclosure NAMES every cause (see
+``_CROSS_TIER_STATIC_LOWER_BOUND_GAP``) — the two incumbent plus the four this cross-tier
+widening introduces:
 
   * a dynamic-URL call (a bare variable / a runtime-concatenated URL with no static
     segment) emits NO ApiCall node at all (``ir.api_call_qualified_name`` returns None) —
     so it can carry no CALLS_API edge;
   * an ApiCall whose canonical route matches no Endpoint carries no edge either
-    (unmatched, e.g. an external / not-yet-extracted service).
+    (unmatched, e.g. an external / not-yet-extracted service);
+  * an in-house HTTP wrapper skip — a call via a project-local wrapper is a recognized
+    gap by design (ADR-20260713), not "no call";
+  * an unresolved ``@Value`` base-url — a JVM S2S caller whose config base-url could not
+    be resolved has no grounded target;
+  * an unparsed dev-proxy — a vite/svelte proxy rewrite that is a JS function or an
+    env-only target could not be statically evaluated;
+  * dataflow not recovered — a JVM caller whose URL is assembled / multi-hop (beyond
+    one-hop param->uri) emits NO ApiCall.
 
 So an Endpoint with zero incoming CALLS_API is "no statically-linked caller found", NEVER
 "endpoint unused"; completeness is not claimed. Each edge carries its confidence +
@@ -33,14 +44,24 @@ from palimpsest.ir import CALLS_API
 from palimpsest.recall.graphrag import _item, _result
 
 # ALWAYS emitted (ac-6 honesty): the static-lower-bound disclosure. Absence of a CALLS_API
-# edge is an honest gap (dynamic URL -> no ApiCall; unmatched route -> no edge), never an
-# "endpoint unused" verdict.
+# edge is an honest gap, never an "endpoint unused" verdict. The enumeration NAMES every
+# incompleteness cause (the two incumbent + the four this widening introduces) so a consumer
+# never reads an empty result as completeness — the #18 exhaustive-enumeration precedent.
 _CROSS_TIER_STATIC_LOWER_BOUND_GAP = (
-    "CALLS_API is a STATIC lower bound on cross-tier wiring: a dynamic-URL call (a bare "
-    "variable / a runtime-concatenated URL with no static segment) emits NO ApiCall node, "
-    "and an ApiCall whose canonical route matches no Endpoint carries no edge — so the "
-    "ABSENCE of a CALLS_API edge NEVER means 'this endpoint is unused' or 'this call hits "
-    "nothing'; it means 'no statically-linked peer was found'. Completeness is not claimed"
+    "CALLS_API is a STATIC lower bound on cross-tier wiring; the ABSENCE of a CALLS_API edge "
+    "NEVER means 'this endpoint is unused' or 'this call hits nothing', it means 'no "
+    "statically-linked peer was found'. A link can be legitimately missing for ANY of these "
+    "causes: (1) a dynamic-URL call (a bare variable / a runtime-concatenated URL with no "
+    "static segment) emits NO ApiCall node; (2) an ApiCall whose canonical route matches no "
+    "Endpoint carries no edge; (3) an in-house HTTP wrapper skip — a call routed through a "
+    "project-local wrapper (io.incognito.rest.client, createApiClient) is a recognized gap "
+    "by design (ADR-20260713), not 'no call'; (4) an unresolved @Value base-url — a JVM "
+    "service-to-service caller whose config base-url could not be resolved (env-only / "
+    "ambiguous profile / compose-alias -> module) has no grounded target; (5) an unparsed "
+    "dev-proxy — a vite/svelte proxy whose rewrite is a JS function or an env-only target "
+    "could not be statically evaluated, so the f/e route is not resolved; (6) dataflow "
+    "not recovered — a JVM caller whose URL is assembled / multi-hop (beyond one-hop "
+    "param->uri) emits NO ApiCall. Completeness is not claimed"
 )
 
 # ApiCall(s) that CALLS_API a given Endpoint (endpoint -> callers). The edge grounding

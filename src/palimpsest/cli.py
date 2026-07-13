@@ -46,6 +46,7 @@ from neo4j import GraphDatabase
 
 from palimpsest.backfill import backfill
 from palimpsest.extract import dispatch, read_provenance
+from palimpsest.extract.proxy_config import read_proxy_rewrite
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
 from palimpsest.kg.calls_api import load_calls_api
@@ -89,7 +90,10 @@ def _cmd_ingest(args) -> None:
         # (front-end ApiCall -> back-end/f-e Endpoint by canonical route). It queries
         # the just-ingested deterministic nodes, so it runs AFTER ingest — via the
         # dedicated inferred loader, never the generic edge writer (Frozen Invariant 3).
-        calls_api = load_calls_api(driver)
+        # The repo's dev-proxy rewrite (mechanism A) is read host-neutrally from the
+        # repo root and threaded in so a front-end /api call resolves to the back-end
+        # route through the proxy (wi_260713iah part 4).
+        calls_api = load_calls_api(driver, proxy=read_proxy_rewrite(args.repo))
     print(
         f"ingested {len(ir.nodes)} nodes, {len(ir.edges)} edges "
         f"from {args.repo} @ {prov.source_commit}"

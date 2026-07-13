@@ -66,6 +66,40 @@ ANY_METHOD = "*"
 # the single-segment placeholder when building an ApiCall route (Decision 3).
 _URL_INTERPOLATION = re.compile(r"\$\{[^}]*\}")
 
+# MATCH-level sentinel for a route the dev-proxy rewrite cannot resolve statically
+# (a function-valued ``rewrite`` / an env-only proxy target — mechanism A GAP). It
+# starts with the Unit Separator, never ``/``, so it can NEVER equal a real canonical
+# route path: an ApiCall reduced to it matches NO Endpoint, so an unevaluable proxy
+# rewrite yields an honest gap (no cross-tier link) instead of a false one. Applied
+# ONLY at the MATCH level (below), never in the IDENTITY-level ``normalize_endpoint_path``.
+UNRESOLVABLE_ROUTE = "\x1f<proxy-unresolvable>"
+
+# An absolute target host bound into a route's path (``http://svc:8080/api/x``) — the
+# grounded-S2S ApiCall shape (mechanism B stamps the resolved host into the ApiCall
+# qualified_name to BIND which service is called). The host is NOT part of the route:
+# it is stripped at the MATCH level so a grounded call reduces to method+PATH and
+# matches its host-less Endpoint peer; :func:`route_host` recovers it separately as the
+# target-binding + confidence signal (wi_260713iah part 3). ``[^/]+`` stops at the first
+# ``/`` so ``host:port`` is captured whole; group 2 is the ``/path`` (or empty).
+_SCHEME_HOST = re.compile(r"^(https?://[^/]+)(/.*)?$")
+
+
+def route_host(qualified_name: str) -> Optional[str]:
+    """The absolute target host bound into a route's path (``http://svc:8080``), or None.
+
+    Reads the same ``<ns>:{method} {path}`` shape as :func:`canonical_match_key` (an
+    optional namespace prefix before the first space is stripped). The host is the
+    mechanism-B target binding — it confirms WHICH service a grounded call reaches and
+    informs confidence, but is deliberately NOT part of the match key (that is host-less)."""
+    s = qualified_name
+    space = s.find(" ")
+    colon = s.find(":")
+    if colon != -1 and (space == -1 or colon < space):
+        s = s[colon + 1:]
+    _, _, path = s.partition(" ")
+    m = _SCHEME_HOST.match(path)
+    return m.group(1) if m else None
+
 
 def normalize_endpoint_path(raw_path: str) -> str:
     """IDENTITY-level path normalization (Decision 2a) — PRESERVES param names.
@@ -112,7 +146,7 @@ def _canonical_segment(seg: str) -> str:
     return seg
 
 
-def canonical_route_path(path: str) -> str:
+def canonical_route_path(path: str, proxy=None) -> str:
     """MATCH-level path canonicalization (Decision 2b), idempotent.
 
     Per ``/`` segment: any single path variable ([id], [id=m], {id}, {id:regex},
@@ -120,14 +154,33 @@ def canonical_route_path(path: str) -> str:
     {*x}, {**}) -> "{**}"; a literal segment is unchanged (case-sensitive). The
     placeholders "{}" / "{**}" are fixed points, so applying it twice yields the
     same string (a route already at match level is stable).
+
+    ``proxy`` (mechanism A, MATCH LEVEL ONLY) is an optional dev-proxy rewrite
+    mapping (``extract.proxy_config.ProxyRewrite``, duck-typed via ``.resolve``): a
+    front-end ``/api`` call reaches the back-end through the dev-proxy, so the match
+    key must reflect that rewrite. ``None`` (the default) leaves the canonical path
+    untouched — byte-identical to the pre-mechanism-A behavior, so route IDENTITY and
+    the #21 match contract are unaffected. When supplied, ``proxy.resolve`` maps the
+    canonical path to the path the back-end actually serves, or returns None for a
+    prefix whose rewrite is unevaluable (function/env) -> :data:`UNRESOLVABLE_ROUTE`
+    so the call matches no Endpoint (honest gap, never a false link).
     """
+    # Strip an absolute target host (``http://svc:8080/api/x`` -> ``/api/x``) before
+    # segmenting: mechanism B stamps the host into a grounded ApiCall's identity to bind
+    # the target service, but the host is NOT part of the route, so it must not pollute
+    # the MATCH key (wi_260713iah part 3). A host-less Endpoint path is untouched.
+    host = _SCHEME_HOST.match(path)
+    if host:
+        path = host.group(2) or "/"
     segments = [s for s in path.split("/") if s != ""]
-    if not segments:
-        return "/"
-    return "/" + "/".join(_canonical_segment(s) for s in segments)
+    canonical = "/" + "/".join(_canonical_segment(s) for s in segments) if segments else "/"
+    if proxy is None:
+        return canonical
+    resolved = proxy.resolve(canonical)
+    return resolved if resolved is not None else UNRESOLVABLE_ROUTE
 
 
-def canonical_match_key(qualified_name: str) -> tuple[str, str]:
+def canonical_match_key(qualified_name: str, proxy=None) -> tuple[str, str]:
     """The cross-tier matcher's ONLY entry point (Decision 2b).
 
     Strips an optional ``<ns>:`` namespace prefix (only when the ``:`` occurs
@@ -136,6 +189,10 @@ def canonical_match_key(qualified_name: str) -> tuple[str, str]:
     ``(method, canonical_route_path(path))``. So "GET /api/users/[id]",
     "spring:GET /api/users/{userId}" and "apicall:GET /api/users/{}" all reduce to
     ``("GET", "/api/users/{}")``.
+
+    ``proxy`` (mechanism A) is forwarded to :func:`canonical_route_path` — applied at
+    the MATCH level only, so an ApiCall under an unevaluable dev-proxy prefix reduces
+    to (method, :data:`UNRESOLVABLE_ROUTE`) and links to nothing.
     """
     s = qualified_name
     space = s.find(" ")
@@ -143,7 +200,7 @@ def canonical_match_key(qualified_name: str) -> tuple[str, str]:
     if colon != -1 and (space == -1 or colon < space):
         s = s[colon + 1:]
     method, _, path = s.partition(" ")
-    return (method, canonical_route_path(path))
+    return (method, canonical_route_path(path, proxy=proxy))
 
 
 def api_call_qualified_name(method: str, raw_url: str) -> Optional[str]:
@@ -332,6 +389,14 @@ class Node:
     # ``id``/``branch_scoped_id`` so it never perturbs node identity;
     # ``scope_to_branch``'s ``replace`` preserves it.
     role: Optional[str] = None
+    # One-hop dataflow-recovery marker (wi_260713iah ac-4): True on an ApiCall
+    # recovered by the param->uri dataflow (a helper-passed URL), else None for a
+    # direct call-site literal. The cross-tier matcher reads it (through ingest +
+    # loader) to stamp the CALLS_API link ``transform='dataflow'`` and cap its
+    # confidence below the literal 1.0 tier — so a recovered link is auditably
+    # distinct from a genuine direct-literal match. Like the markers above, a pure
+    # PROPERTY OFF identity; ``scope_to_branch``'s ``replace`` preserves it.
+    dataflow_derived: Optional[bool] = None
 
     @property
     def id(self) -> str:
@@ -348,6 +413,7 @@ class Node:
             "is_test": self.is_test,
             "server_only": self.server_only,
             "role": self.role,
+            "dataflow_derived": self.dataflow_derived,
             "provenance": self.provenance.to_dict(),
         }
 

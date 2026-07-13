@@ -29,6 +29,16 @@ from palimpsest.ir import IR, Node, Edge, Provenance
 from palimpsest.ir import REPO, PACKAGE, FILE, CLASS, METHOD, FUNCTION, ENDPOINT
 from palimpsest.ir import CONTAINS, CALLS, DEPENDS_ON, REALIZES, HANDLES
 from palimpsest.extract.spring import AnnotationInfo, spring_role, spring_endpoints
+from palimpsest.extract.jvm_http import (
+    JvmHttpCall,
+    UriHelper,
+    DataflowRecovery,
+    api_call_nodes,
+    dataflow_api_call_nodes,
+    call_verb,
+    http_method_of_arg,
+)
+from palimpsest.extract.http_origins import is_recognized_call
 
 _LANGUAGE = Language(tskotlin.language())
 
@@ -264,6 +274,9 @@ class _FileWalker:
         # class fqn -> referenced simple type names (ctor-injection params + fields),
         # resolved to Class->Class DEPENDS_ON at corpus assembly (ac-9).
         self.class_refs: dict[str, set[str]] = {}
+        # single-type import SIMPLE name -> resolved Java FQN (the HTTP scanner resolves
+        # a receiver's declared type through this to a registered construct origin).
+        self.import_fqn: dict[str, str] = {}
 
     def _edge(self, kind: str, src: str, dst: str) -> None:
         self.edges.append(Edge(kind=kind, src=src, dst=dst, provenance=self.prov))
@@ -297,6 +310,8 @@ class _FileWalker:
                 self._function_decl(child)
             elif child.type == "class_declaration":
                 self._class_decl(child)
+            elif child.type == "import":
+                self._import(child)
         # is_test marker (issue #17): Kotlin parses no imports/annotations here, so
         # the signal is the Gradle `src/test` path convention. Marks every code-unit
         # node this file produced — pure PROPERTY, post-walk (mirrors java.py).
@@ -304,6 +319,36 @@ class _FileWalker:
             for n in self.nodes:
                 if n.kind in (FILE, CLASS, METHOD, FUNCTION):
                     n.is_test = True
+        # JVM outbound-HTTP caller scan (wi_260713iah): a recognized literal-URL call
+        # (receiver resolves via import to a registered construct) -> ApiCall node.
+        # Shares the grammar-agnostic recognizer with java.py (no per-tier divergence).
+        var_types = _kotlin_var_types(self.root)
+        self.nodes.extend(
+            api_call_nodes(
+                _kotlin_http_calls(self.root, var_types),
+                self.import_fqn,
+                self.rel_path,
+                self.prov,
+            )
+        )
+        # One-hop param->uri dataflow (wi_260713iah part 1): mirrors java.py over the
+        # Kotlin grammar — a helper whose parameter flows into a recognized uri()/verb
+        # call, called with a LITERAL, recovers the ApiCall the literal scan left as gap.
+        helpers = _kotlin_uri_helpers(self.root, var_types, self.import_fqn)
+        if helpers:
+            self.nodes.extend(
+                dataflow_api_call_nodes(
+                    _kotlin_helper_recoveries(self.root, helpers), self.rel_path, self.prov
+                )
+            )
+
+    def _import(self, node: TSNode) -> None:
+        """Bind a single-type ``import a.b.C`` — simple name ``C`` -> FQN ``a.b.C`` (a
+        ``*`` wildcard import carries no single type name and is skipped)."""
+        for c in node.named_children:
+            if c.type == "qualified_identifier":
+                fqn = c.text.decode()
+                self.import_fqn[fqn.split(".")[-1]] = fqn
 
     def _function_decl(self, node: TSNode) -> None:
         name = _name_of(node)
@@ -486,6 +531,259 @@ def _depends_on_edges(
                     continue
                 seen.add((src_fqn, dst_fqn))
                 out.append(Edge(kind=DEPENDS_ON, src=src_fqn, dst=dst_fqn, provenance=prov))
+    return out
+
+
+# --- JVM outbound-HTTP caller scan (wi_260713iah) ----------------------------------
+# The Kotlin grammar half of the shared ``jvm_http`` recognizer, mirroring java.py:
+# walk the tree into normalized ``JvmHttpCall`` records the grammar-agnostic recognizer
+# scores. Kotlin shapes a call as ``call_expression(navigation_expression(recv, name),
+# value_arguments)`` (vs Java's ``method_invocation``), so the traversal differs but
+# the emitted records — and thus recognition — are identical across the two tiers.
+
+def _decl_name(node: TSNode) -> str | None:
+    """First ``identifier`` after an optional ``modifiers`` block — a decl's own name."""
+    for c in node.named_children:
+        if c.type == "modifiers":
+            continue
+        if c.type == "identifier":
+            return c.text.decode()
+    return None
+
+
+def _kotlin_var_types(root: TSNode) -> dict[str, str]:
+    """Map each variable NAME (ctor/function param, property) to its declared simple
+    type name — the file-level symbol table a receiver identifier is resolved against.
+    An inferred (type-less) declaration is skipped (``?``)."""
+    out: dict[str, str] = {}
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        target: TSNode | None = None
+        if n.type in ("class_parameter", "parameter"):
+            target = n
+        elif n.type == "property_declaration":
+            target = next(
+                (c for c in n.named_children if c.type == "variable_declaration"), None
+            )
+        if target is not None:
+            name = _decl_name(target)
+            t = _type_simple(_type_after_name(target))
+            if name and t != "?":
+                out[name] = t
+        stack.extend(n.named_children)
+    return out
+
+
+def _kotlin_http_call(call: TSNode, var_types: dict[str, str]) -> JvmHttpCall | None:
+    """Read one ``call_expression`` into a :class:`JvmHttpCall` (None if it is an
+    unqualified call — no navigation receiver to type)."""
+    nav = None
+    args = None
+    for c in call.named_children:
+        if c.type == "navigation_expression":
+            nav = c
+        elif c.type == "value_arguments":
+            args = c
+    if nav is None or len(nav.named_children) < 2:
+        return None
+    recv = nav.named_children[0]
+    call_name = nav.named_children[-1].text.decode()
+    # Walk the receiver chain to its root identifier, collecting the chain's verbs.
+    chain_verbs: list[str] = []
+    root = recv
+    while root is not None and root.type == "call_expression":
+        inner_nav = next(
+            (c for c in root.named_children if c.type == "navigation_expression"), None
+        )
+        if inner_nav is None or len(inner_nav.named_children) < 2:
+            break
+        chain_verbs.append(inner_nav.named_children[-1].text.decode())
+        root = inner_nav.named_children[0]
+    receiver_type = None
+    if root is not None and root.type == "identifier":
+        receiver_type = var_types.get(root.text.decode())
+    url_literal = None
+    method_arg = None
+    if args is not None:
+        vargs = [va for va in args.named_children if va.type == "value_argument"]
+        if vargs and vargs[0].named_children and vargs[0].named_children[0].type == "string_literal":
+            url_literal = vargs[0].named_children[0].text.decode()
+        if len(vargs) >= 2 and vargs[1].named_children:
+            method_arg = http_method_of_arg(vargs[1].named_children[0].text.decode())
+    return JvmHttpCall(
+        receiver_type=receiver_type,
+        call_name=call_name,
+        url_literal=url_literal,
+        chain_verbs=tuple(chain_verbs),
+        method_arg=method_arg,
+        start_line=_line(call.start_point),
+        end_line=_line(call.end_point),
+    )
+
+
+def _kotlin_http_calls(root: TSNode, var_types: dict[str, str]) -> list[JvmHttpCall]:
+    """Every ``call_expression`` in the file as a :class:`JvmHttpCall` record."""
+    calls: list[JvmHttpCall] = []
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == "call_expression":
+            call = _kotlin_http_call(n, var_types)
+            if call is not None:
+                calls.append(call)
+        stack.extend(n.named_children)
+    return calls
+
+
+# Node types that make an identifier's use an ASSEMBLED URL (concatenation), not a
+# single clean hop -> the one-hop dataflow rejects a param used inside one (honest gap).
+_KOTLIN_ASSEMBLY = frozenset(
+    {"additive_expression", "multiplicative_expression", "binary_expression"}
+)
+
+
+def _kotlin_param_names(func: TSNode) -> list[str]:
+    """Ordered parameter NAMES of a Kotlin function declaration."""
+    params = next(
+        (c for c in func.named_children if c.type == "function_value_parameters"), None
+    )
+    if params is None:
+        return []
+    names: list[str] = []
+    for p in params.named_children:
+        if p.type == "parameter":
+            n = next((c for c in p.named_children if c.type == "identifier"), None)
+            if n is not None:
+                names.append(n.text.decode())
+    return names
+
+
+def _kotlin_path_arg_param(call: TSNode, param_names: set[str]) -> Optional[str]:
+    """The param flowing as a BARE argument into a ``.path(...)`` builder call (Spring
+    ``UriBuilder.path(String)``) inside ``call`` — the URL PATH specifically, preferred
+    over params feeding elsewhere in the same uri lambda (``.build(pathVariables)``)."""
+    stack = [call]
+    while stack:
+        n = stack.pop()
+        if n.type == "call_expression":
+            nav = next(
+                (c for c in n.named_children if c.type == "navigation_expression"), None
+            )
+            args = next(
+                (c for c in n.named_children if c.type == "value_arguments"), None
+            )
+            if (
+                nav is not None
+                and len(nav.named_children) >= 2
+                and nav.named_children[-1].text.decode() == "path"
+                and args is not None
+            ):
+                for va in args.named_children:
+                    if va.type == "value_argument":
+                        for c in va.named_children:
+                            if c.type in ("identifier", "simple_identifier") and (
+                                c.text.decode() in param_names
+                            ):
+                                return c.text.decode()
+        stack.extend(n.named_children)
+    return None
+
+
+def _kotlin_param_flow(call: TSNode, param_names: set[str]) -> Optional[str]:
+    """The parameter whose identifier flows as a BARE argument into ``call`` (one hop).
+    A param inside an additive/multiplicative expression is assembly -> None (gap)."""
+    args = next((c for c in call.named_children if c.type == "value_arguments"), None)
+    if args is None:
+        return None
+    # Prefer the param feeding a `.path(...)` builder over one flowing elsewhere into
+    # the same uri lambda (e.g. `.build(pathVariables)`).
+    path_param = _kotlin_path_arg_param(call, param_names)
+    if path_param is not None:
+        return path_param
+    stack: list[tuple[TSNode, bool]] = [(args, False)]
+    while stack:
+        n, in_asm = stack.pop()
+        asm = in_asm or n.type in _KOTLIN_ASSEMBLY
+        if n.type in ("identifier", "simple_identifier") and not asm:
+            if n.text.decode() in param_names:
+                return n.text.decode()
+        for c in n.named_children:
+            stack.append((c, asm))
+    return None
+
+
+def _kotlin_uri_helper(
+    func: TSNode, var_types: dict[str, str], import_fqn: dict[str, str]
+) -> Optional[UriHelper]:
+    """A Kotlin function as a one-hop :class:`UriHelper`, or None (mirrors _java_uri_helper)."""
+    name = _name_of(func)
+    if name is None:
+        return None
+    param_names = _kotlin_param_names(func)
+    if not param_names:
+        return None
+    param_set = set(param_names)
+    stack = [func]
+    while stack:
+        n = stack.pop()
+        if n.type == "call_expression":
+            hc = _kotlin_http_call(n, var_types)
+            if hc is not None and hc.url_literal is None and call_verb(hc) is not None:
+                origin = import_fqn.get(hc.receiver_type) if hc.receiver_type else None
+                if is_recognized_call(hc.receiver_type or "", origin):
+                    flowing = _kotlin_param_flow(n, param_set)
+                    if flowing is not None:
+                        return UriHelper(name, param_names.index(flowing), call_verb(hc))
+        stack.extend(n.named_children)
+    return None
+
+
+def _kotlin_uri_helpers(
+    root: TSNode, var_types: dict[str, str], import_fqn: dict[str, str]
+) -> dict[str, UriHelper]:
+    helpers: dict[str, UriHelper] = {}
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == "function_declaration":
+            h = _kotlin_uri_helper(n, var_types, import_fqn)
+            if h is not None:
+                helpers[h.name] = h
+        stack.extend(n.named_children)
+    return helpers
+
+
+def _kotlin_helper_recoveries(
+    root: TSNode, helpers: dict[str, UriHelper]
+) -> list[DataflowRecovery]:
+    """Recover a call for every UNQUALIFIED call site passing a string LITERAL at a known
+    helper's flowing parameter index (one hop). An unqualified Kotlin call is a
+    ``call_expression`` whose first named child is the bare name identifier."""
+    out: list[DataflowRecovery] = []
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == "call_expression" and n.named_children:
+            head = n.named_children[0]
+            h = helpers.get(head.text.decode()) if head.type == "identifier" else None
+            if h is not None:
+                args = next(
+                    (c for c in n.named_children if c.type == "value_arguments"), None
+                )
+                vargs = [c for c in args.named_children if c.type == "value_argument"] if args else []
+                if len(vargs) > h.param_index:
+                    inner = vargs[h.param_index].named_children
+                    if inner and inner[0].type == "string_literal":
+                        out.append(
+                            DataflowRecovery(
+                                verb=h.verb,
+                                url_literal=inner[0].text.decode(),
+                                start_line=_line(n.start_point),
+                                end_line=_line(n.end_point),
+                            )
+                        )
+        stack.extend(n.named_children)
     return out
 
 

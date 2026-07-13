@@ -19,11 +19,13 @@ reduction. The tests pin the TWO deliberately-separate normalization levels:
 """
 
 from palimpsest.ir import (
+    UNRESOLVABLE_ROUTE,
     api_call_qualified_name,
     canonical_match_key,
     canonical_route_path,
     normalize_endpoint_path,
 )
+from palimpsest.extract.proxy_config import ProxyRewrite, ProxyRule, GAP, KEEP
 
 
 # --- IDENTITY level: normalize_endpoint_path PRESERVES param names (2a) --------
@@ -107,3 +109,51 @@ def test_api_call_qualified_name_dynamic_returns_none():
     assert api_call_qualified_name("GET", "'/api/' + id") is None
     # A literal that is ONLY an interpolation is a dressed-up bare variable -> None.
     assert api_call_qualified_name("GET", "`${url}`") is None
+
+
+# --- MATCH-level dev-proxy rewrite (mechanism A), MATCH LEVEL ONLY -------------
+#
+# WHY these exist: a front-end /api call reaches the back-end via a dev-proxy, so the
+# MATCH key must apply the proxy rewrite. This lives ONLY in canonical_route_path /
+# canonical_match_key (never in normalize_endpoint_path — that is the IDENTITY level;
+# leaking there would drift #21 Endpoint qualified_names + f/e ApiCall keys). The
+# ``proxy`` arg defaults None -> byte-identical to today (the tests above still pass).
+
+_KEEP_API = ProxyRewrite((ProxyRule("/api", "http://localhost:8080", KEEP),))
+_GAP_API = ProxyRewrite((ProxyRule("/api", "http://localhost:8080", GAP),))
+
+
+def test_proxy_default_none_is_unchanged():
+    # No proxy arg == today's behavior (the #21 identity/match contract is intact).
+    assert canonical_route_path("/api/users/[id]") == "/api/users/{}"
+    assert canonical_route_path("/api/users/[id]", proxy=None) == "/api/users/{}"
+    assert canonical_match_key("GET /api/users/[id]") == ("GET", "/api/users/{}")
+
+
+def test_proxy_keep_preserves_match_key():
+    # KEEP: the /api prefix is forwarded unchanged, so the match key is identical to
+    # the no-proxy key -> the front-end call still matches a /api/{} Endpoint.
+    assert canonical_route_path("/api/users/[id]", proxy=_KEEP_API) == "/api/users/{}"
+    assert canonical_match_key("GET /api/users/[id]", proxy=_KEEP_API) == (
+        "GET",
+        "/api/users/{}",
+    )
+
+
+def test_proxy_gap_suppresses_match():
+    # GAP (function rewrite / env-only target): tree-sitter cannot evaluate the
+    # transform, so the call's match key becomes the UNRESOLVABLE sentinel — it
+    # equals NO real Endpoint key -> no false cross-tier link (honest gap).
+    assert canonical_route_path("/api/users/[id]", proxy=_GAP_API) == UNRESOLVABLE_ROUTE
+    method, path = canonical_match_key("GET /api/users/[id]", proxy=_GAP_API)
+    assert method == "GET"
+    assert path == UNRESOLVABLE_ROUTE
+    # The sentinel can never collide with a real canonical Endpoint path.
+    assert UNRESOLVABLE_ROUTE != canonical_route_path("/api/users/{userId}")
+    assert not UNRESOLVABLE_ROUTE.startswith("/")
+
+
+def test_proxy_non_matching_prefix_untouched():
+    # A path NOT under the proxied prefix is canonicalized normally even with a GAP
+    # rule present (the gap only bites its own prefix).
+    assert canonical_route_path("/other/x", proxy=_GAP_API) == "/other/x"
