@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1.0",
   "project_name": "palimpsest",
-  "updated_at": "2026-07-04T00:00:00.000Z",
+  "updated_at": "2026-07-13T00:00:00.000Z",
   "context_path": ".ditto/knowledge/CONTEXT.md",
   "glossary_path": ".ditto/knowledge/glossary.json",
   "project_map_path": null,
@@ -10,6 +10,11 @@
       "name": "inferred-writer-no-verbatim-reuse",
       "summary": "추론/생성형(inferred) writer는 결정론 writer를 verbatim 재사용하지 말 것 — 멱등 구조(MERGE-on-id, 라벨별 CONSTRAINT)만 재사용하고 provenance·거부 로직은 별도 신설한다. 결정론 MATCH-MATCH-MERGE는 endpoint 미해소 시 무성 드롭이라 근거결박 '거부' 계약과 충돌하고, git provenance(committed_at)는 외부 생성물에 의미가 없다.",
       "path": "src/palimpsest/kg/summary.py"
+    },
+    {
+      "name": "multilang-name-local-resolution-imports-only-cross-lang",
+      "summary": "다언어 통합 추출: 이름 기반 CALLS/DEPENDS_ON은 각 언어 fragment(예: ts=.ts+.tsx, js=.js+.jsx, svelte) 자기 노드 집합 안에서만 해석하고(union-wide 재해석 금지), cross-language 연결은 명시적 IMPORTS specifier 해석(드라이버 레벨)만으로 이룬다(SC-B). 근거: 이름 기반 해석이 언어 경계를 넘으면 동명 오탐이 생기고 community 그룹핑(CALLS+DEPENDS_ON 소비, IMPORTS 미소비)이 기존 언어 community를 오병합한다. Go/Rust/Python 등 후속 언어 추출기에 재사용.",
+      "path": "src/palimpsest/extract/ecmascript.py"
     }
   ],
   "learnings": [
@@ -17,6 +22,16 @@
       "summary": "계약 경계(결정론 merge·라벨 uniqueness·provenance·테스트 계약)를 건드리는 슬라이스는 구현 전 far-field coverage 스윕이 실질 블로커(무성 드롭·Summary id가 코드 노드 가림·provenance 오염·exact-set 테스트 두 곳 파손·edge_kind 분리 테스트 파손)를 required-fix로 선접어 구현 후 escape 0.",
       "evidence": [{"kind": "note", "command": "wi_260701cjf slice 4 far-field coverage sweep (17 categories, 3-group adversarial)"}],
       "learned_at": "2026-07-01T00:00:00.000Z"
+    },
+    {
+      "summary": "JS 생태계 레포는 node_modules/.git/dist/build/.svelte-kit/.next/out/coverage 등 vendored/build 디렉토리를 파일 워크에서 제외해야 소스만 색인된다(Java/Kotlin엔 불필요했던 요구 — 리뷰가 늦게 포착). extract/ecmascript.py의 _EXCLUDED_DIRS + _is_vendored로 강제.",
+      "evidence": [{"kind": "code", "command": "src/palimpsest/extract/ecmascript.py:398-405 (_EXCLUDED_DIRS, _is_vendored) — commit 4eaf85b"}],
+      "learned_at": "2026-07-13T00:00:00.000Z"
+    },
+    {
+      "summary": "Svelte는 tree-sitter-svelte로 <script lang=ts|js> 블록(script_element>raw_text)을 byte-slice 후 TS/JS walker로 재파싱하는 2단 파싱이 필요하고, raw_text.start_point의 line_offset로 sub-tree 라인을 실제 .svelte 라인으로 보정한다. 한 .svelte의 모든 script 블록은 하나의 File 노드를 공유(emit_file=False).",
+      "evidence": [{"kind": "code", "command": "src/palimpsest/extract/svelte.py:104-177 (extract_svelte_fragment) — commit 4eaf85b"}],
+      "learned_at": "2026-07-13T00:00:00.000Z"
     }
   ],
   "projected_to_claude_md": true

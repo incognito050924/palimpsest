@@ -327,7 +327,7 @@ agent는 사용자 작업공간을 공유한다.
 agent는 모호함을 드러내고, 작게 바꾸고, 증거로만 완료를 말하고, 사용자의 의도를 조용히 줄이지 않는다. 별것 아닌 듯 보이지만, 이 업계에서는 그게 꽤 높은 기준이다.
 <!-- ditto:managed:end -->
 
-<!-- ditto:knowledge:start sha256=e3cf892b1202f1e0d631db112faf3834c2c4d8f085ec8788a4bc41e78a5d8cd1 -->
+<!-- ditto:knowledge:start sha256=c8e37c7de0d6088f0690bb04024fafd0d4f358dd3340f99f6b201dd21f12dacd -->
 # DITTO Knowledge (projected — do not edit by hand)
 
 Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summary.
@@ -362,5 +362,6 @@ Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summ
 - ADR-20260704-semantic-embedding-load-contract · active · ADR-20260704-semantic-embedding-load-contract — palimpsest 의미층 임베딩 적재 계약: provider-free, 인덱스당 단일 model·차원 pin·독립 코사인-KNN 회상 채널
 - ADR-20260706-generative-curator-direction · active · ADR-20260706-generative-curator-direction — palimpsest 생성형 큐레이터 방향 회복: 격리 opt-in 생산자 + git 선(先)물질화, provider-free 정련
 - ADR-20260712-palimpsest-identity-host-neutral-generative-curator · active · ADR-20260712-palimpsest-identity-host-neutral-generative-curator — palimpsest 정체성 불변식: 환경 비종속 + 생성형 큐레이터
+- ADR-20260713-multilang-depends-on-name-local-boundary · active · ADR-20260713-multilang-depends-on-name-local-boundary — 다언어 추출: DEPENDS_ON은 정적 타입 언어에만 + name-based 해석의 언어-로컬 경계(SC-B)
 
 <!-- ditto:knowledge:end -->

@@ -31,6 +31,11 @@ agreed terms, and learnings over time.
 - **ADR-20260703-branch-scoped-node-identity** (active) — 브랜치 스코프 노드 정체성: id에 branch 차원을 접어(scope_to_branch, None=bare byte-identical) 같은 심볼의 브랜치 버전이 붕괴 없이 공존. backfill의 '커밋별 버전드 안 만듦'을 branch 축에 한해 supersede, provider-free 유지. → `adr/ADR-20260703-branch-scoped-node-identity.md`
 - **ADR-20260706-generative-curator-direction** (active) — 생성형 큐레이터 방향 회복: 격리 opt-in in-process 생산자 + git 선(先)물질화 → 기존 멱등 inferred 로더. provider-free를 전역→경로-스코프로 정련(recall+load 경로만 LLM-free), content-verdict는 외부 유지. 정밀 콜그래프는 주 build-less tree-sitter spine + 옵션 보조 CodeQL(도입 아님, 보안-Risk 니치 유예). → `adr/ADR-20260706-generative-curator-direction.md`
 - **ADR-20260712-palimpsest-identity-host-neutral-generative-curator** (active) — palimpsest 정체성 불변식(최상위): ① 환경 비종속(소비자-일반 표면·소비자 개념 비내부화·역방향 종속 금지; ditto는 주·첫 소비자일 뿐) ② 생성형 큐레이터=핵심 목적. ADR-20260626/20260706을 supersede 않고 authority로 승격 + always-loaded 투영으로 드리프트 방지. → `adr/ADR-20260712-palimpsest-identity-host-neutral-generative-curator.md`
+- **ADR-20260713-multilang-depends-on-name-local-boundary** (active) — 다언어 추출: ① DEPENDS_ON은 정적 타입주석 있는 언어에만(TS는 정적 타입 있으므로 약화 아닌 추가, `.js`엔 없음; query-compile 경계로 강제) ② SC-B — 이름 기반 CALLS/DEPENDS_ON은 각 언어 fragment 안에서만 해석, cross-language 연결은 IMPORTS specifier 해석만. → `adr/ADR-20260713-multilang-depends-on-name-local-boundary.md`
+
+## 추출기 진척
+
+- **다언어 ECMAScript 추출기 (#9, wi_260713lom, commit 4eaf85b)** — TS/JS/React/Svelte 정적 추출기 슬라이스 완료: 공유 `extract/ecmascript.py` 코어(`_EcmaWalker` + per-fragment 리졸버) + per-family 어댑터(typescript/javascript/svelte.py) + `extract_ecmascript` 통합 드라이버(ts→js→svelte fragment 격리 후 union-wide IMPORTS 해석). 범위 = IR 레벨(제품 ingest 배선은 #13에서). de-Class 하부(FUNCTION 노드 + community `_unit_of`의 Class∪Module 일반화)를 재사용. 결정 근거는 ADR-20260713.
 
 ## v1 초점
 
