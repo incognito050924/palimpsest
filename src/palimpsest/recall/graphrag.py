@@ -1212,6 +1212,40 @@ def _test_impact_hop(driver, frontier, visited, depth, budget):
     return items, emitted, truncated
 
 
+def _test_impact_from_seeds(driver, seed_ids, depth, limit):
+    """The shared backward-CALLS BFS, seeded with a SET of production Method ids — one for
+    :func:`recall_test_impact`, the WHOLE resolved changeset for
+    :func:`recall_changeset_impact`. Walks ``CALLS`` BACKWARD hop by hop (a per-hop bounded
+    BFS mirroring :func:`recall`, NOT a variable-length ``[:CALLS*1..depth]`` path),
+    expanding the frontier through ALL backward callers while collecting ONLY ``is_test``
+    callers as items. A SHARED ``visited`` set means a test reached from several seeds — or
+    via several paths — is DISTINCT-deduped to EXACTLY one item, and total items are bounded
+    by ``limit``. The initial frontier is id-sorted (and every later frontier is already
+    id-ordered by :func:`_test_impact_hop`) so selection under the limit is rebuild-stable.
+    ``depth <= 0`` (or an empty seed set) degrades to an empty result. Returns ``items``.
+
+    Bounding (ac-3 — COMPUTE, not just output rows): each hop reads at most
+    ``budget + |visited| + 1`` server-side rows, per-frontier-node fan-out is capped at
+    ``_TEST_IMPACT_FANOUT_CAP``, and total items are bounded by ``limit``.
+    """
+    items = []
+    visited = set(seed_ids)
+    frontier = sorted(visited)
+    cur_depth = 0
+    while frontier and cur_depth < depth and len(items) < limit:
+        cur_depth += 1
+        new_items, emitted, truncated = _test_impact_hop(
+            driver, frontier, visited, cur_depth, limit - len(items)
+        )
+        items.extend(new_items)
+        if truncated:
+            # Item budget spent mid-level; the top-``limit`` id-ordered test callers are
+            # returned (a bounded answer — this channel does not page beyond ``limit``).
+            break
+        frontier = emitted  # next hop expands from the callers just found
+    return items
+
+
 def recall_test_impact(driver, method_id, depth=10, limit=25):
     """Recall the test Methods that transitively call a production Method (#7).
 
@@ -1249,22 +1283,124 @@ def recall_test_impact(driver, method_id, depth=10, limit=25):
         gaps.append(f"seed '{method_id}' did not resolve to any node in the graph")
         return _result([], gaps, None, [])
 
-    items = []
-    visited = {seed["id"]}
-    frontier = [seed["id"]]
-    cur_depth = 0
-    while frontier and cur_depth < depth and len(items) < limit:
-        cur_depth += 1
-        new_items, emitted, truncated = _test_impact_hop(
-            driver, frontier, visited, cur_depth, limit - len(items)
-        )
-        items.extend(new_items)
-        if truncated:
-            # Item budget spent mid-level; the top-``limit`` id-ordered test callers are
-            # returned (a bounded answer — this channel does not page beyond ``limit``).
-            break
-        frontier = emitted  # next hop expands from the callers just found
+    # Seed the shared backward-CALLS BFS with the single resolved Method id.
+    items = _test_impact_from_seeds(driver, [seed["id"]], depth, limit)
 
     if not items:
         gaps.append(_test_impact_reingest_gap(seed["id"]))
+    return _result(items, gaps, None, [])
+
+
+# ── changeset-impact: the changeset-level generalization of test-impact ───────
+# "Given a code CHANGE (a changeset), which tests transitively cover the changed code?"
+# A QUERY-SIDE derivation, NOT edge materialisation: it resolves the changeset to a SET
+# of production Method seeds and reuses the SAME backward-CALLS BFS as recall_test_impact,
+# seeded with the whole set at once (a shared ``visited`` dedups a test reached from several
+# seeds to one item). It materialises NO new edge and calls NO LLM.
+
+# Resolve the changed FILES of a changeset to the production Methods they CONTAIN. Files are
+# keyed by branch-scoped ``id`` but carry a ``path`` property — match on ``path``. CONTAINS*
+# spans File -> Class -> Method (a Method nested under its Class under its File). This is a
+# FILE-GRANULARITY OVER-APPROXIMATION: MODIFIES / diff is file-level and there is no
+# line->method mapping, so EVERY Method in a changed File is taken as (possibly) changed.
+_CHANGESET_FILE_METHODS = (
+    "MATCH (f:File) WHERE f.path IN $paths "
+    "MATCH (f)-[:CONTAINS*]->(m:Method) RETURN DISTINCT m.id AS id"
+)
+
+# Resolve a changeset COMMIT to the production Methods its MODIFIED Files contain. Same
+# file-granularity over-approximation. Episode {id: commit} -[:MODIFIES]-> File, then
+# CONTAINS* down to each Method.
+_CHANGESET_COMMIT_METHODS = (
+    "MATCH (e:Episode {id: $commit})-[:MODIFIES]->(:File)-[:CONTAINS*]->(m:Method) "
+    "RETURN DISTINCT m.id AS id"
+)
+
+# Standing gap (ac-3 honesty), emitted WHENEVER file / commit seeds were used: those seeds
+# resolve at FILE granularity, so an impacted test may in fact cover an UNCHANGED method that
+# merely shares a changed file — the impacted set is an UPPER bound for those seeds. (Explicit
+# ``methods`` seeds are exact and do not trigger this note.)
+_CHANGESET_OVERAPPROX_GAP = (
+    "file / commit seeds over-approximate to FILE granularity: every Method in a changed "
+    "File is treated as changed (MODIFIES / diff is file-level, with no line->method "
+    "mapping), so an impacted test may cover an UNCHANGED method sharing a changed file — "
+    "the impacted set is an upper bound for those seeds"
+)
+
+
+def _resolve_changeset_seeds(driver, files, methods, commit):
+    """Resolve a changeset — any combination of changed Files, explicit Methods, and a
+    commit — to the deduped SET of production Method seed ids. Explicit ``methods`` resolve
+    EXACTLY via :func:`_resolve` (id / qualified_name), keeping only Method-labelled nodes;
+    ``files`` and ``commit`` resolve at FILE granularity (every Method a changed File
+    contains — see :data:`_CHANGESET_OVERAPPROX_GAP`). Combinatorial only, no LLM."""
+    seed_ids = set()
+    if methods:
+        for m in methods:
+            node = _resolve(driver, m)
+            if node is not None and "Method" in (node.get("labels") or ()):
+                seed_ids.add(node["id"])
+    if files or commit:
+        with driver.session() as session:
+            if files:
+                for r in session.run(_CHANGESET_FILE_METHODS, paths=list(files)):
+                    seed_ids.add(r["id"])
+            if commit:
+                for r in session.run(_CHANGESET_COMMIT_METHODS, commit=commit):
+                    seed_ids.add(r["id"])
+    return seed_ids
+
+
+def recall_changeset_impact(
+    driver, *, files=None, methods=None, commit=None, depth=10, limit=25
+):
+    """Recall the test Methods impacted by a CHANGESET — the changeset-level generalization
+    of :func:`recall_test_impact`.
+
+    A SEPARATE, read-only entry point that answers "given a code change, which tests
+    transitively cover the changed code (and might break)?". The changeset is any combination
+    of changed ``files`` (repo-relative paths), explicit ``methods`` (Method ids /
+    qualified_names), and a ``commit`` id; at least one must be given. Step 1 resolves it to a
+    deduped SET of production Method seeds (``files`` / ``commit`` over-approximate to file
+    granularity — every Method in a changed File; ``methods`` resolve exactly). Step 2 runs
+    the SAME per-hop bounded backward-CALLS BFS as :func:`recall_test_impact`, seeded with the
+    WHOLE set at once via :func:`_test_impact_from_seeds`, so a test reached from several seeds
+    is DISTINCT-deduped to EXACTLY one item and total items are bounded by ``limit``.
+
+    QUERY-SIDE only: it materialises NO new edge and calls NO LLM — a pure combinatorial
+    derivation over the existing CALLS traversal. Same bounded
+    ``{items, sources, summaries, gaps, confidence, expand_handle}`` shape; the impacted test
+    Methods are the grounded ``items`` (author-omitted via :func:`_item` / :func:`_sources`).
+
+    Gaps (ac-3 honesty): the static-lower-bound note is ALWAYS present; the over-approximation
+    note rides along WHENEVER ``files`` / ``commit`` seeds were used; an empty changeset, or
+    one that resolves to no Method seed, is an EXPLICIT gap (never a confident empty answer);
+    and when seeds resolved but no test caller was found, the DISTINCT re-ingest advisory is
+    added, exactly as :func:`recall_test_impact`.
+    """
+    gaps = [_STATIC_LOWER_BOUND_GAP]
+    if files or commit:
+        gaps.append(_CHANGESET_OVERAPPROX_GAP)
+
+    if not (files or methods or commit):
+        gaps.append(
+            "changeset is empty: provide at least one of files / methods / commit "
+            "to resolve a Method seed set"
+        )
+        return _result([], gaps, None, [])
+
+    seed_ids = _resolve_changeset_seeds(driver, files, methods, commit)
+    if not seed_ids:
+        gaps.append(
+            "changeset did not resolve to any Method seed in the graph (no matching "
+            "File / commit / Method) — an empty result here means 'nothing resolved', "
+            "not 'no tests impacted'"
+        )
+        return _result([], gaps, None, [])
+
+    # Seed the shared backward-CALLS BFS with the WHOLE resolved changeset at once.
+    items = _test_impact_from_seeds(driver, seed_ids, depth, limit)
+
+    if not items:
+        gaps.append(_test_impact_reingest_gap(f"{len(seed_ids)} changeset seed method(s)"))
     return _result(items, gaps, None, [])
