@@ -10,7 +10,7 @@
 - **[A] 다언어 온톨로지 확장** — Kotlin/Python/JS·TS 등 함수-우선 언어 지원 (상태: 탐색)
 - **[B] Summary 커버리지·응집 검증** — 요약이 코드를 다 담았나 / 코드가 한 가지만 하나 (상태: 탐색)
 - **[C] 구조 추출 정밀도** — source-only AST(현재) vs semantic 분석(CodeQL)·외부 producer 소비 (상태: 탐색)
-- **[D] 테스트 코드 모델링 & 테스트 임팩트** — 테스트/프로덕션 구분 + test→target 관계 + 변경→영향 테스트 회상 (상태: 탐색)
+- **[D] 테스트 코드 모델링 & 테스트 임팩트** — 테스트/프로덕션 구분 + test→target 관계 + 변경→영향 테스트 회상 (상태: D-Q1~Q4 결정됨 · COVERS materialize·런타임 overlay는 구현 유예=트리거 대기, 이슈 #19)
 - **[E] 브랜치 모델링** — branch를 property(현재)로 vs Branch 노드로 reify (진입점·계보). 성능은 인덱스로 (상태: 탐색)
 - **[F] 코드베이스 품질 이해·정규화 substrate** — 코드 품질을 이해·정규화 패턴 제공, 구조를 지속 가꾸기(pre-compute 질의가능 팩트층). ditto#9의 palimpsest측 동기 (상태: 탐색 · seed)
 
@@ -263,15 +263,15 @@ Summary 품질엔 세 축이 있고 서로 다르다. 헷갈리지 않게 정리
 
 "코드는 고쳤는데 테스트가 깨지는 경우가 허다하다. 특히 **간접적으로 연결**되면, **관계가 멀면 에이전트가 관련 코드(테스트)로 인지조차 못 하는** 경우가 있었다." → 변경이 어떤 테스트에 영향을 주는지(test impact)를 그래프가 답해주면 좋겠다.
 
-## 1. 현재 상태 (사실 — grep 확인)
+## 1. 현재 상태 (사실 — 코드 확인, 2026-07-14 갱신)
 
-**테스트는 IR에 표현은 되나 구분은 안 된다.**
-- 온톨로지에 test/covers/verify 개념 **없음**(`ir.py` 노드 = REPO/PACKAGE/FILE/CLASS/METHOD/COMMUNITY뿐).
-- extractor가 `src/test`·`@Test`·junit 등을 **구분 안 함**(`java.py` 무처리) — 테스트 `.java`도 평범한 Class/Method로 추출.
-- `TESTS`/`COVERS`/`is_test` 엣지·속성 **없음**.
-- 테스트↔프로덕션 링크는 **오직 `CALLS` 엣지(test method → production method)로만 암묵적**.
+**테스트는 구분되고(속성), 변경→영향 테스트는 회상 채널이 답한다. 단 test→target은 1급 엣지가 아니라 질의시 역추적이다.**
+- `is_test` **속성 존재**(`ir.py:380`, 순수 property — 서브타입 아님, `ir.py:388`). 7개 extractor 전부 마킹(java/kotlin/python/go/rust/ecmascript/sveltekit, 이슈 #17). 경로·소스셋 신호로 test 코드 분류.
+- 변경→영향 테스트 **회상 채널 존재**: `recall_test_impact`(`graphrag.py:1215`) — production Method 씨앗에서 `CALLS`를 **역방향** per-hop bounded BFS로 걸어 전이적으로 호출하는 `is_test=true` Method를 수집. `test → production_helper → seed` 같은 먼/간접 체인(사용자가 겪던 실패)을 프로덕션 중간자를 통과시켜 잡음.
+- 여전히 **`TESTS`/`COVERS` 1급 엣지는 없음** — test→검증대상 관계는 **질의시 역추적**으로만 답하고 그래프에 materialize하지 않음(이슈 #19 항목①, 유예).
+- 정적 CALLS 역추적은 **하한**임을 코드가 항상 정직 표기(`_STATIC_LOWER_BOUND_GAP`, `graphrag.py:1156` — reflection/DI/polymorphic 호출부 비가시, ISSTA 2024 근거).
 
-## 2. 갭 (사실 + 판단)
+## 2. 갭 (2026-07-05 최초 식별 — 현재 상태·해소는 §1·§5)
 
 1. **테스트/프로덕션 구분 없음** — "테스트만"/"프로덕션만" 질의 불가.
 2. **명시적 test→target(TESTS/COVERS) 엣지 없음** — "이 테스트가 저 코드를 검증"이 **다중 홉 CALLS로만** 암묵, 1급 아님.
@@ -281,7 +281,7 @@ Summary 품질엔 세 축이 있고 서로 다르다. 헷갈리지 않게 정리
 
 간접/먼 test↔code 인지는 **정밀 전이 콜그래프**가 있어야 풀린다. 이름 기반 AST는 먼 체인을 잃지만 CodeQL 실 콜그래프(+데이터플로우)는 정확·traversable. → **테스트 임팩트 분석이 CodeQL 도입의 강력한 정당화.** (주제 C ↔ D 상호 강화)
 
-## 4. 제안 (모델링 방향)
+## 4. 제안 (2026-07-05 최초 모델링 방향 — 확정 결정은 §5)
 
 - **D-1 테스트 마커**: Class/Method를 test로 분류 — 경로(`src/test/`·`*_test.py`·`*.spec.ts`)·애노테이션(`@Test`)·프레임워크 import(junit/pytest/jest). 싸고 가치 큼. `is_test` 속성 또는 TEST 서브타입.
 - **D-2 `TESTS`/`COVERS` 엣지(1급)**: test→검증 대상. 도출 —
@@ -289,12 +289,18 @@ Summary 품질엔 세 축이 있고 서로 다르다. 헷갈리지 않게 정리
   - **런타임**: 커버리지 맵(테스트 실행 → 커버 라인) — "실제로 도는" 것에 가장 정확하나 **테스트 실행 필요**(빌드+실행 의존, HEAD-only).
 - **D-3 테스트 임팩트 회상 채널**: 변경(MODIFIES)에서 역방향으로 "이 코드를 전이적으로 커버하는 테스트" — MODIFIES 역추적 + test 필터. 에이전트가 놓치던 관련 테스트를 그래프가 찾아줌.
 
-## 5. 미해결 질문 (Open Questions)
+## 5. 결정 (2026-07-14 · 이슈 #19에서 D-Q1~Q4 해소)
 
-- **D-Q1**: 테스트 구분을 속성(`is_test`)으로 vs 별도 노드 서브타입(TEST)으로?
-- **D-Q2**: `COVERS`를 정적 전이 CALLS로 도출(빌드리스 가능, 정밀도는 콜그래프 품질에 좌우) vs 런타임 커버리지로(정확하나 실행·HEAD-only)? 둘 다 두고 provenance로 구분?
-- **D-Q3**: 테스트 임팩트를 회상 채널로(질의 시 역추적) vs `COVERS` 엣지로 미리 materialize? (churn/co-change처럼 bounded 필요)
-- **D-Q4**: 다언어 테스트 프레임워크(junit/pytest/jest/…) 마커 규칙을 어디서 관리? (주제 A extractor별)
+- **D-Q1 (테스트 구분: 속성 vs 서브타입) → 속성(`is_test`).** 착지 완료(`ir.py:380`, 순수 property; 이슈 #17). 서브타입은 노드 identity를 늘려 얻는 게 없어 기각 — 필터는 property로 충분.
+- **D-Q2 (COVERS 도출: 정적 vs 런타임) → 비대칭 이중 provenance. ADR-20260706 §결정6 상속.**
+  - **정적 전이 CALLS = 1급 default** — build-less·전이력 균일·host-neutral이라 정체성 불변식(ADR-20260706·ADR-20260712)과 정합. 근본적 하한임은 코드가 정직 표기(`_STATIC_LOWER_BOUND_GAP`).
+  - **런타임 커버리지 = provenance/edge_kind 분리 opt-in HEAD-only overlay** — build+run 의존이라 build-less·전이력 불변식을 깸. **정확도 트리거 + 전용 ADR 뒤에 유예**(이슈 #19 항목②). 이는 §결정6이 콜그래프 축(주=spine, 보조=HEAD-only overlay, coverage-asymmetry를 provenance로 표기)에 이미 확정한 구조를 test-impact로 상속 — 새 결정 아님.
+- **D-Q3 (임팩트: 회상 채널 vs COVERS materialize) → 회상 채널 유지가 default.** `recall_test_impact`(`graphrag.py:1215`)가 per-hop COMPUTE-bounded BFS로 이미 답함. COVERS는 전이 관계라 materialize = 전이 폐포 precompute → churn/co-change(윈도우 내 pairwise, 자연 bounded)와 달리 자연 bound가 없어 인위적 bound(=완전성 손실)를 요구. 물질화의 유일 이득은 소비자가 recall API를 안 거치고 그래프-네이티브로 traverse하는 것 — **그 소비자가 없으면 유지비만 늘고 이득 0**(YAGNI). **1급 queryable 엣지를 요구하는 구체 소비자가 생길 때만 승격**(이슈 #19 항목①).
+- **D-Q4 (다언어 마커 관리 위치) → extractor별.** 착지 완료 — 7개 extractor가 각 언어의 test 신호(경로·소스셋·애노테이션)를 자체 마킹(이슈 #17). 주제 A(extractor별 온톨로지)와 동일 경계.
+
+### 유예 승격 트리거 (이슈 #19 — 둘 다 design-blocked)
+- **항목① COVERS 물질화**: 다운스트림 소비자(예: ditto ImpactGraph)가 recall API로는 못 하는 **그래프-네이티브 test→code traversal(1급 엣지)**을 실제로 요구할 때. 도출은 D-Q2의 정적 default를 bounded materialize.
+- **항목② 런타임 커버리지 overlay**: 정적 하한이 실무에서 불충분하다는 **정확도 요구**가 실제로 생길 때. 착수 전 **전용 ADR 필요**(build-less·전이력·환경 비종속 불변식과 intent 충돌 — ADR-20260706 §결정6, ADR-20260712 §결정1c).
 
 ---
 
@@ -401,3 +407,4 @@ F-Q4/F-Q1/F-Q2(앵커·산출물·경계)가 정해지면 그 부분만 ADR로 �
 - 2026-07-12 — 주제 F(코드베이스 품질 이해·정규화 substrate) 추가 — GitHub issue #1(seed) 물질화. 동기(품질=이해가능 구조 전제, ditto#9의 palimpsest측 동기), substrate=주제 C/T9 build-less tree-sitter spine(Glean *도구*는 트릴레마로 기각·*패턴*만 채택, ADR-20260706 §결정6), advisory 경계(변경은 소비자). F-Q1~5 정리(ID 유지·논리 재배열) + F-Q6(자기인증 경계) 신규. ADR-20260712("환경 비종속")는 이슈 참조하나 저장소 미착지(drift 기록).
 - 2026-07-12 — drift 정리 — 주제 C §5(방향: 외부도구 적극도입 + CodeQL 이중 producer)와 색인 방향 라벨 삭제 — ADR-20260706 §결정6이 spine 주·CodeQL 보조로 역전했으므로. §6 미해결 질문 → §5 재번호. 정확한 방향은 ADR-20260706·ADR-20260712·재검토 백로그에 있음.
 - 2026-07-13 — #1(F)·#6(B) 소유권 계약 반영 — 합치지 않고 분리 유지. F-Q5는 facet 열거만·coverage/응집 SoT는 주제 B가 소유(F는 재정의 없이 위임), B는 F의 첫 실증 파일럿(B-후보1 ≡ F-후보1 동형). 주제 B에 §7(주제 F와의 소유권 경계) 추가, F-Q5 문구 날카롭게. GitHub #1↔#6 상호 링크 코멘트.
+- 2026-07-14 — 주제 D(test-impact) 열린 질문 D-Q1~Q4 해소(이슈 #19, wi_260714exj). §1 현재상태 drift 수정(is_test 속성·recall_test_impact 회상 채널이 실제로는 존재 — #17·#7 착지 반영). §5를 "미해결 질문"→"결정"으로 전환: D-Q1=속성(#17 착지)·D-Q4=extractor별(#17 착지)·D-Q2=비대칭 이중 provenance(정적 1급 default + 런타임 opt-in overlay, ADR-20260706 §결정6 상속)·D-Q3=회상 채널 유지 default(COVERS materialize는 소비자 트리거 뒤 유예). 이슈 #19 두 항목(COVERS 물질화·런타임 overlay)의 유예 승격 트리거를 명문화. 코드 변경 0(design-note only).
