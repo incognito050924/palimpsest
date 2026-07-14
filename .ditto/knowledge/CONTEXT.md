@@ -32,6 +32,7 @@ agreed terms, and learnings over time.
 - **ADR-20260706-generative-curator-direction** (active) — 생성형 큐레이터 방향 회복: 격리 opt-in in-process 생산자 + git 선(先)물질화 → 기존 멱등 inferred 로더. provider-free를 전역→경로-스코프로 정련(recall+load 경로만 LLM-free), content-verdict는 외부 유지. 정밀 콜그래프는 주 build-less tree-sitter spine + 옵션 보조 CodeQL(도입 아님, 보안-Risk 니치 유예). → `adr/ADR-20260706-generative-curator-direction.md`
 - **ADR-20260712-palimpsest-identity-host-neutral-generative-curator** (active) — palimpsest 정체성 불변식(최상위): ① 환경 비종속(소비자-일반 표면·소비자 개념 비내부화·역방향 종속 금지; ditto는 주·첫 소비자일 뿐) ② 생성형 큐레이터=핵심 목적. ADR-20260626/20260706을 supersede 않고 authority로 승격 + always-loaded 투영으로 드리프트 방지. → `adr/ADR-20260712-palimpsest-identity-host-neutral-generative-curator.md`
 - **ADR-20260713-multilang-depends-on-name-local-boundary** (active) — 다언어 추출: ① DEPENDS_ON은 정적 타입주석 있는 언어에만(TS는 정적 타입 있으므로 약화 아닌 추가, `.js`엔 없음; query-compile 경계로 강제) ② SC-B — 이름 기반 CALLS/DEPENDS_ON은 각 언어 fragment 안에서만 해석, cross-language 연결은 IMPORTS specifier 해석만. → `adr/ADR-20260713-multilang-depends-on-name-local-boundary.md`
+- **ADR-20260714-code-quality-relate-curate-specialization** (active) — F-Q4: 코드베이스 품질 이해·정규화(주제 F/이슈 #1)는 새 최상위 정체성이 아니라 기존 축의 특화 — 구조 품질 팩트=Relate 특화(detect-only), 안티패턴·리팩터 후보=Curate 특화(외부 생성·근거결박·자기인증 금지). ADR-20260712 불변식(환경 비종속·생성형 큐레이터)의 코드-품질 적용. 이슈 #1을 정체성 교착에서 facet 작업으로 강등. → `adr/ADR-20260714-code-quality-relate-curate-specialization.md`
 
 ## 추출기 진척
 
