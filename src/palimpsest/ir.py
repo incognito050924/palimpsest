@@ -317,6 +317,17 @@ ADDRESSES_RISK = "ADDRESSES_RISK"    # edge type (DesignDecision -> Risk)
 # an accidental CALLS_API in ``ir.edges``, forcing use of that dedicated loader.
 CALLS_API = "CALLS_API"    # edge type (ApiCall -> Endpoint), inferred
 
+# Runtime coverage overlay edge (dedicated loader, CALLS_API precedent — ADR-20260714):
+# a test Method COVERS a production Method when the test was OBSERVED at runtime to
+# execute it (measured by an external producer's per-test coverage, build+run OUTSIDE
+# palimpsest, handed in as a producer-neutral payload). Catches the reflection/DI/
+# polymorphic-dispatch callers the static CALLS lower bound cannot see. DELIBERATELY
+# absent from ``REL_TYPES`` (Frozen Invariant 3, the CALLS_API precedent) so the generic
+# deterministic writer can never stamp it AND the backfill per-commit loop never touches
+# it — ``kg/coverage.py`` is the ONLY producer and writes it ``edge_kind='runtime'``,
+# HEAD-only. Augments, never replaces, the static test-impact channel.
+COVERS = "COVERS"    # edge type (Method{is_test} -> Method), runtime
+
 # Inferred GENERIC relations between two EXISTING entities (no new node): an
 # external generator asserts a relation; palimpsest loads it grounded (both
 # endpoints resolve) with edge_kind='inferred'. rel_type is restricted to this
@@ -326,11 +337,15 @@ RELATES_TO = "RELATES_TO"               # association
 CONFLICTS_WITH = "CONFLICTS_WITH"       # conflict (숨은 의도 충돌 표시)
 INFERRED_RELATION_TYPES = frozenset({CAUSALLY_RELATES, RELATES_TO, CONFLICTS_WITH})
 
-# ``edge_kind`` marker — the schema-enforced no-laundering separation between the
-# deterministic structural layer and the inferred semantic layer. Both values are
-# colocated here so the two edge_kind constants live in one place.
+# ``edge_kind`` marker — the schema-enforced no-laundering separation between three
+# provenance layers: the deterministic STRUCTURAL layer (tree-sitter spine), the
+# inferred SEMANTIC layer (externally-generated summaries/risks/relations), and the
+# runtime OBSERVED layer (ADR-20260714: coverage measured at build+run OUTSIDE
+# palimpsest, HEAD-only). All three values are colocated here so the edge_kind
+# constants live in one place.
 EDGE_KIND_DETERMINISTIC = "deterministic"
 EDGE_KIND_INFERRED = "inferred"
+EDGE_KIND_RUNTIME = "runtime"
 
 # The single shared embedding dimension. This ONE constant is used by BOTH the
 # Neo4j VECTOR INDEX DDL and the per-summary dimension validator — never two

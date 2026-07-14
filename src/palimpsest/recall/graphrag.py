@@ -49,12 +49,14 @@ from datetime import datetime
 
 from palimpsest.ir import (
     CALLS,
+    COVERS,
     DEPENDS_ON,
     CONTAINS,
     IMPORTS,
     MEMBER_OF,
     MODIFIES,
     INFERRED_RELATION_TYPES,
+    EDGE_KIND_RUNTIME,
     EMBEDDING_DIM,
 )
 from palimpsest.kg.summary import VECTOR_INDEX_NAME
@@ -1403,4 +1405,66 @@ def recall_changeset_impact(
 
     if not items:
         gaps.append(_test_impact_reingest_gap(f"{len(seed_ids)} changeset seed method(s)"))
+    return _result(items, gaps, None, [])
+
+
+# ── runtime-coverage overlay: the OBSERVED-execution AUGMENT of static test-impact ──────
+# "Which tests were OBSERVED at runtime to cover this production Method?" — reads the
+# COVERS(edge_kind='runtime') edges the ``kg.coverage`` loader materialised from an external
+# producer's per-test coverage (ADR-20260714). A SEPARATE, provenance-distinct channel: it
+# AUGMENTS the static CALLS channel (:func:`recall_test_impact`), never replaces it. Runtime
+# coverage is a DIRECT observation (a test executed a method or it did not), so this is a
+# single backward-COVERS hop — no transitive BFS. Combinatorial only, no LLM, no build.
+
+# Backward COVERS from a production Method to the test Methods observed to cover it. Rows
+# only; projection is via :func:`_item` (author-omitted, never a whole-node projection). The
+# edge's ``edge_kind`` is projected so the item carries the runtime-overlay provenance marker.
+_RUNTIME_TEST_CALLERS = """
+MATCH (prod:Method {id: $id})<-[r:COVERS]-(t:Method)
+RETURN t.id AS id, labels(t) AS labels, t.name AS name, t.qualified_name AS qualified_name,
+       t.path AS path, t.start_line AS start_line, t.end_line AS end_line,
+       t.source_commit AS source_commit, t.committed_at AS committed_at,
+       r.edge_kind AS edge_kind
+ORDER BY id
+LIMIT $lim
+"""
+
+# ALWAYS emitted (the overlay's honesty axis, the runtime peer of _STATIC_LOWER_BOUND_GAP):
+# the overlay is opt-in + HEAD-only, so an absent COVERS edge means "this test run did not
+# measure it (or none was loaded)", NEVER "no test covers it" — and it is an AUGMENT of, not
+# a replacement for, the static channel.
+_RUNTIME_OVERLAY_GAP = (
+    "runtime coverage overlay is opt-in and HEAD-only (COVERS edges are materialised from an "
+    "external producer's per-test coverage against the built HEAD): an empty or short result "
+    "means 'not measured by the coverage producer', not 'no test covers it'. This AUGMENTS the "
+    "static CALLS test-impact channel — it does not replace it"
+)
+
+
+def recall_runtime_test_impact(driver, method_id, limit=25):
+    """Recall the test Methods OBSERVED at runtime to cover a production Method (ADR-20260714).
+
+    A SEPARATE, read-only overlay entry point that AUGMENTS :func:`recall_test_impact`. Reads
+    the ``COVERS`` (``edge_kind='runtime'``) edges the :mod:`palimpsest.kg.coverage` loader
+    materialised from a producer's per-test coverage — one backward hop from the production
+    ``method_id`` to its covering test Methods (runtime coverage is a direct observation, not a
+    transitive relation, so there is no BFS). Each item is tagged ``relation=COVERS`` and
+    carries ``edge_kind='runtime'`` so an overlay result is PROVENANCE-DISTINCT from a static
+    ``relation=CALLS`` one and the two channels never merge. Same bounded
+    ``{items, sources, summaries, gaps, confidence, expand_handle}`` shape (author-omitted via
+    :func:`_item` / :func:`_sources`); combinatorial only, no LLM, no build.
+
+    Gaps: the opt-in / HEAD-only disclosure (:data:`_RUNTIME_OVERLAY_GAP`) is ALWAYS present —
+    absence of a COVERS edge is 'not measured', never 'no test covers it'. This overlay does
+    NOT carry the static lower-bound gap; that stays on the static channel it augments.
+    """
+    gaps = [_RUNTIME_OVERLAY_GAP]
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_RUNTIME_TEST_CALLERS, id=method_id, lim=limit)]
+    items = [{**_item(r, COVERS, 1), "edge_kind": r.get("edge_kind") or EDGE_KIND_RUNTIME}
+             for r in rows]
+    if not items:
+        gaps.append(
+            f"no runtime COVERS caller for '{method_id}' — see the overlay disclosure above"
+        )
     return _result(items, gaps, None, [])

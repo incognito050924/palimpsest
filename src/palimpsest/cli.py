@@ -50,6 +50,7 @@ from palimpsest.extract.proxy_config import read_proxy_rewrite
 from palimpsest.ir import Summary
 from palimpsest.kg import augment_communities, create_constraints, ingest, load_summaries
 from palimpsest.kg.calls_api import load_calls_api
+from palimpsest.kg.coverage import CoverageRecord, load_coverage
 from palimpsest.kg.summary import create_vector_index, summary_id
 from palimpsest.recall import (
     recall,
@@ -57,6 +58,7 @@ from palimpsest.recall import (
     recall_cochange,
     recall_test_impact,
     recall_changeset_impact,
+    recall_runtime_test_impact,
 )
 from palimpsest.recall.graphrag import reconcile_recall
 from palimpsest.reconcile import capture
@@ -153,6 +155,16 @@ def _cmd_changeset_impact(args) -> int:
         args.file, args.method, args.commit, args.depth, args.limit, result
     )
     return 0
+
+
+def _cmd_runtime_test_impact(args) -> None:
+    # The runtime-coverage OVERLAY of test-impact (ADR-20260714): reads the
+    # COVERS(edge_kind='runtime') edges to surface the tests OBSERVED at runtime to cover a
+    # production Method — the AUGMENT that catches the reflection/DI/polymorphic callers static
+    # CALLS misses. A SEPARATE channel from `test-impact`; provenance-distinct (relation=COVERS).
+    with _driver() as driver:
+        result = recall_runtime_test_impact(driver, args.method_id, limit=args.limit)
+    _print_runtime_test_impact(args.method_id, args.limit, result)
 
 
 def _cmd_query(args) -> None:
@@ -281,6 +293,43 @@ def _cmd_load(args) -> None:
         # index survive a drop. Idempotent (IF NOT EXISTS); awaits ONLINE.
         create_vector_index(driver)
     _print_load_result(args.payload, result)
+
+
+def _read_coverage_file(path) -> list:
+    with open(path, encoding="utf-8") as f:
+        return [CoverageRecord.from_dict(d) for d in json.load(f)]
+
+
+def _print_coverage_load_result(payload, result) -> None:
+    print(f"LOAD-COVERAGE: {payload}")
+    print(
+        f"  records={result.intended}  covers_edges={result.loaded}  "
+        f"rejected={result.rejected}"
+    )
+    # Rejections / unresolved targets are SURFACED, never silently dropped (ac-3 honesty).
+    print(f"  reasons ({len(result.reasons)})")
+    if not result.reasons:
+        print("    (none)")
+    for r in result.reasons:
+        print(f"    - {r}")
+
+
+def _cmd_load_coverage(args) -> None:
+    # The runtime-coverage overlay load (ADR-20260714): a DIRECTORY is the git-tracked
+    # source-of-truth (mirrors `load`), each *.json an array of per-test coverage records
+    # ({test_qualified_name, covered[], source_commit}) produced OUTSIDE palimpsest. Materialises
+    # COVERS(edge_kind='runtime') edges against the CURRENT HEAD projection — run this AFTER
+    # `ingest`, NEVER inside `backfill` (HEAD-only isolation). palimpsest runs no build.
+    if os.path.isdir(args.payload):
+        records = [
+            r for p in sorted(Path(args.payload).glob("*.json"))
+            for r in _read_coverage_file(p)
+        ]
+    else:
+        records = _read_coverage_file(args.payload)
+    with _driver() as driver:
+        result = load_coverage(driver, records)
+    _print_coverage_load_result(args.payload, result)
 
 
 def _cmd_curate(args) -> None:
@@ -453,6 +502,33 @@ def _print_changeset_impact(files, methods, commit, depth, limit, result) -> Non
     print(f"CONFIDENCE: {result['confidence']}")
 
 
+def _print_runtime_test_impact(method_id, limit, result) -> None:
+    # SEPARATE sections (mirrors _print_changeset_impact): the runtime overlay's covering test
+    # Methods, tagged [via COVERS] to keep them provenance-distinct from the static [via CALLS]
+    # channel, then the GAPS (always the opt-in/HEAD-only disclosure), then CONFIDENCE.
+    items = result["items"]
+    print(f"RUNTIME-TEST-IMPACT: {method_id}  (limit={limit})")
+    print()
+    print(f"RUNTIME-COVERING TESTS ({len(items)})")
+    if not items:
+        print("  (none)")
+    for it in items:
+        print(
+            f"  - {it['kind']} {it['qualified_name'] or it['id']}  "
+            f"[via COVERS, edge_kind={it.get('edge_kind')}]"
+        )
+        print(f"      source: {_fmt_source(it['sources'])}")
+    print()
+    gaps = result["gaps"]
+    print(f"GAPS ({len(gaps)})")
+    if not gaps:
+        print("  (none)")
+    for g in gaps:
+        print(f"  - {g}")
+    print()
+    print(f"CONFIDENCE: {result['confidence']}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="palimpsest", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -569,6 +645,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_ci.add_argument("--depth", type=int, default=10, help="transitive-hop ceiling (default 10)")
     p_ci.add_argument("--limit", type=int, default=25, help="max impacted test callers (default 25)")
     p_ci.set_defaults(func=_cmd_changeset_impact)
+
+    p_lc = sub.add_parser(
+        "load-coverage",
+        help="load an external producer's per-test coverage payload as HEAD-only "
+        "COVERS(edge_kind='runtime') edges (opt-in overlay; palimpsest runs no build)",
+    )
+    p_lc.add_argument(
+        "payload",
+        help="a JSON file (array of {test_qualified_name, covered[], source_commit}) OR a "
+        "directory of such files — the git-tracked source-of-truth to rebuild Neo4j from",
+    )
+    p_lc.set_defaults(func=_cmd_load_coverage)
+
+    p_rti = sub.add_parser(
+        "runtime-test-impact",
+        help="tests OBSERVED at runtime to cover a production Method (backward COVERS) — "
+        "the runtime overlay that AUGMENTS test-impact, provenance-distinct from static CALLS",
+    )
+    p_rti.add_argument("method_id", help="a production Method node id")
+    p_rti.add_argument("--limit", type=int, default=25, help="max covering tests (default 25)")
+    p_rti.set_defaults(func=_cmd_runtime_test_impact)
     return parser
 
 

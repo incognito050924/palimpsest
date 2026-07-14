@@ -17,6 +17,7 @@ from palimpsest.recall.graphrag import (
     recall_cochange,
     recall_test_impact,
     recall_changeset_impact,
+    recall_runtime_test_impact,
     reconcile_recall,
     expand,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "recall_cochange",
     "recall_test_impact",
     "recall_changeset_impact",
+    "recall_runtime_test_impact",
     "reconcile_recall",
     "expand",
     "recall_endpoint_callers",
