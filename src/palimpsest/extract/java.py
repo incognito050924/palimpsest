@@ -9,6 +9,7 @@ members are invisible to a source parser — acceptable for v1.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 from pathlib import Path
 
 import tree_sitter_java as tsjava
@@ -18,6 +19,17 @@ from palimpsest.ir import IR, Node, Edge, Provenance
 from palimpsest.ir import REPO, PACKAGE, FILE, CLASS, METHOD, ENDPOINT
 from palimpsest.ir import CONTAINS, IMPORTS, CALLS, DEPENDS_ON, REALIZES, HANDLES
 from palimpsest.extract.spring import AnnotationInfo, spring_role, spring_endpoints
+from palimpsest.extract.jvm_http import (
+    JvmHttpCall,
+    UriHelper,
+    DataflowRecovery,
+    api_call_nodes,
+    dataflow_api_call_nodes,
+    call_verb,
+    http_method_of_arg,
+)
+from palimpsest.extract.http_origins import is_recognized_call
+from palimpsest.extract.spring_config import resolve_base_url
 
 _TYPE_DECLS = ("class_declaration", "interface_declaration", "enum_declaration", "record_declaration")
 _METHOD_DECLS = ("method_declaration", "constructor_declaration")
@@ -210,11 +222,21 @@ def _has_test(anns: list[AnnotationInfo]) -> bool:
 class _FileWalker:
     """Collects nodes + edges for a single parsed Java file."""
 
-    def __init__(self, rel_path: str, source: bytes, root: TSNode, prov: Provenance):
+    def __init__(
+        self,
+        rel_path: str,
+        source: bytes,
+        root: TSNode,
+        prov: Provenance,
+        source_path: Path | None = None,
+    ):
         self.rel_path = rel_path
         self.source = source
         self.root = root
         self.prov = prov
+        # Absolute path of this file — the anchor config grounding walks up from to find
+        # the module's ``application*.yaml`` (wi_260713iah ac-5). None disables grounding.
+        self.source_path = source_path
         self.pkg = _package_fqn(root)
         self.nodes: list[Node] = []
         self.edges: list[Edge] = []
@@ -231,6 +253,12 @@ class _FileWalker:
         # cannot narrow so are excluded). Java forbids two imports sharing a simple
         # name, so the map is unambiguous.
         self.import_qualified: dict[str, str] = {}
+        # single-type import SIMPLE name -> resolved Java FQN (the HTTP scanner resolves
+        # a receiver's declared type through this to a registered construct origin).
+        # Holds the same simple->FQN data as import_qualified; a distinct feature reads
+        # it (dedup of the two maps is a follow-up, kept separate here to not couple the
+        # merge to a refactor).
+        self.import_fqn: dict[str, str] = {}
         self.file_classes: list[str] = []
         # test-impact signals accumulated over the walk (see _is_test_path etc.).
         self.imports_junit = False
@@ -269,6 +297,50 @@ class _FileWalker:
         if _is_test_path(self.rel_path) or self.imports_junit or self.has_test_annotation:
             for n in self.nodes:
                 n.is_test = True
+        # JVM outbound-HTTP caller scan (wi_260713iah): a recognized literal-URL call
+        # (receiver resolves via import to a registered construct) -> ApiCall node.
+        # Runs last so ApiCall nodes are not is_test-stamped (mirrors ecmascript.py).
+        var_types = _java_var_types(self.root)
+        calls = _java_http_calls(self.root, var_types)
+        self.nodes.extend(
+            api_call_nodes(
+                self._ground_base_urls(calls),
+                self.import_fqn,
+                self.rel_path,
+                self.prov,
+            )
+        )
+        # One-hop param->uri dataflow (wi_260713iah part 1): a helper whose parameter
+        # flows into a recognized uri()/verb call, called with a LITERAL, recovers the
+        # ApiCall the literal-callsite scan above deliberately left as a gap.
+        helpers = _java_uri_helpers(self.root, var_types, self.import_fqn)
+        if helpers:
+            self.nodes.extend(
+                dataflow_api_call_nodes(
+                    _java_helper_recoveries(self.root, helpers), self.rel_path, self.prov
+                )
+            )
+
+    def _ground_base_urls(self, calls: list[JvmHttpCall]) -> list[JvmHttpCall]:
+        """Resolve each ``<field> + "/path"`` S2S call's base-url field to a target host.
+
+        For a call whose URL is concatenated onto a caller field, look up that field's
+        ``@Value("${...}")`` reference and ground it against the module's config
+        (:func:`spring_config.resolve_base_url`). A resolved host is stamped onto the
+        call (binding the target service); an ungrounded one leaves ``base_url`` None
+        so the call emits no ApiCall (honest gap, ac-5/ac-6). Non-concatenated calls
+        pass through untouched."""
+        if not any(c.base_url_field for c in calls):
+            return calls
+        value_fields = _java_value_fields(self.root)
+        out: list[JvmHttpCall] = []
+        for call in calls:
+            if call.base_url_field is not None and self.source_path is not None:
+                ref = value_fields.get(call.base_url_field)
+                host = resolve_base_url(self.source_path, ref) if ref else None
+                call = replace(call, base_url=host)
+            out.append(call)
+        return out
 
     def _import_decl(self, node: TSNode) -> None:
         target = None
@@ -284,6 +356,7 @@ class _FileWalker:
                 simple = target.split(".")[-1]
                 self.import_simple.add(simple)
                 self.import_qualified[simple] = target
+                self.import_fqn[simple] = target
             if _is_junit_import(target):
                 self.imports_junit = True
 
@@ -687,6 +760,272 @@ def _calls_edges(
     ]
 
 
+# --- JVM outbound-HTTP caller scan (wi_260713iah) ----------------------------------
+# The Java grammar half of the shared ``jvm_http`` recognizer: walk the tree into
+# normalized ``JvmHttpCall`` records (chain-root receiver TYPE, verb/URL call shape)
+# that the grammar-agnostic recognizer scores. kotlin.py mirrors this over its own AST.
+
+def _java_var_types(root: TSNode) -> dict[str, str]:
+    """Map each variable NAME (field / local / parameter) to its declared simple type
+    name — the file-level symbol table a receiver identifier is resolved against.
+    Last declaration wins (adequate for the literal-callsite scope)."""
+    out: dict[str, str] = {}
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type in ("field_declaration", "local_variable_declaration"):
+            t = _simple_type_name(n.child_by_field_name("type"))
+            if t:
+                for c in n.named_children:
+                    if c.type == "variable_declarator":
+                        name = c.child_by_field_name("name")
+                        if name is not None:
+                            out[name.text.decode()] = t
+        elif n.type == "formal_parameter":
+            t = _simple_type_name(n.child_by_field_name("type"))
+            name = n.child_by_field_name("name")
+            if t and name is not None:
+                out[name.text.decode()] = t
+        stack.extend(n.named_children)
+    return out
+
+
+def _concat_base_url_arg(arg: TSNode) -> tuple[str, str] | None:
+    """A ``<field> + "literal"`` base-url concatenation -> ``(field_name, url_literal)``.
+
+    Recognizes the S2S shape ``baseUrl + "/portal/api/x"`` (an injected base-url field
+    concatenated with a literal path): a ``binary_expression`` with a ``+`` operator, an
+    identifier left operand, and a string-literal right operand. Returns the field name
+    and the path literal (quotes kept, mirroring ``string_literal`` handling); else None
+    (a non-``+`` expression, a literal+literal, or a non-identifier base is not this
+    shape — grounding only applies to a single injected base-url field, wi_260713iah)."""
+    if arg.type != "binary_expression":
+        return None
+    if arg.child_by_field_name("operator") is not None and arg.child_by_field_name("operator").text != b"+":
+        return None
+    left = arg.child_by_field_name("left")
+    right = arg.child_by_field_name("right")
+    if left is None or right is None:
+        return None
+    if left.type == "identifier" and right.type == "string_literal":
+        return left.text.decode(), right.text.decode()
+    return None
+
+
+def _java_value_fields(root: TSNode) -> dict[str, str]:
+    """Map each field NAME carrying ``@Value("${...}")`` to that annotation's inner
+    string — the caller-side symbol table config grounding resolves a base-url field
+    against (wi_260713iah ac-5). Only the referenced KEY is read; the value never flows
+    through here (secret-exposure constraint is enforced in ``spring_config``)."""
+    out: dict[str, str] = {}
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == "field_declaration":
+            ref = None
+            for ann in _annotations(n):
+                if ann.name == "Value" and ann.args:
+                    ref = ann.args[0]
+                    break
+            if ref is not None:
+                for c in n.named_children:
+                    if c.type == "variable_declarator":
+                        name = c.child_by_field_name("name")
+                        if name is not None:
+                            out[name.text.decode()] = ref
+        stack.extend(n.named_children)
+    return out
+
+
+def _java_http_call(inv: TSNode, var_types: dict[str, str]) -> JvmHttpCall | None:
+    """Read one ``method_invocation`` into a :class:`JvmHttpCall` (None if it has no name)."""
+    name_node = inv.child_by_field_name("name")
+    if name_node is None:
+        return None
+    # Walk the object chain to the root receiver, collecting the chain's verb methods.
+    chain_verbs: list[str] = []
+    obj = inv.child_by_field_name("object")
+    while obj is not None and obj.type == "method_invocation":
+        vn = obj.child_by_field_name("name")
+        if vn is not None:
+            chain_verbs.append(vn.text.decode())
+        obj = obj.child_by_field_name("object")
+    receiver_type = None
+    if obj is not None and obj.type == "identifier":
+        receiver_type = var_types.get(obj.text.decode())
+    url_literal = None
+    base_url_field = None
+    method_arg = None
+    args = inv.child_by_field_name("arguments")
+    if args is not None:
+        positional = args.named_children
+        if positional and positional[0].type == "string_literal":
+            url_literal = positional[0].text.decode()
+        elif positional:
+            concat = _concat_base_url_arg(positional[0])
+            if concat is not None:
+                base_url_field, url_literal = concat
+        if len(positional) >= 2:
+            method_arg = http_method_of_arg(positional[1].text.decode())
+    return JvmHttpCall(
+        receiver_type=receiver_type,
+        call_name=name_node.text.decode(),
+        url_literal=url_literal,
+        chain_verbs=tuple(chain_verbs),
+        method_arg=method_arg,
+        start_line=_line(inv.start_point),
+        end_line=_line(inv.end_point),
+        base_url_field=base_url_field,
+    )
+
+
+def _java_http_calls(root: TSNode, var_types: dict[str, str]) -> list[JvmHttpCall]:
+    """Every ``method_invocation`` in the file as a :class:`JvmHttpCall` record."""
+    calls: list[JvmHttpCall] = []
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == "method_invocation":
+            call = _java_http_call(n, var_types)
+            if call is not None:
+                calls.append(call)
+        stack.extend(n.named_children)
+    return calls
+
+
+def _formal_param_names(method: TSNode) -> list[str]:
+    """Ordered parameter NAMES of a method declaration (the helper's call-site index)."""
+    params = method.child_by_field_name("parameters")
+    if params is None:
+        return []
+    names: list[str] = []
+    for p in params.named_children:
+        if p.type in ("formal_parameter", "spread_parameter"):
+            n = p.child_by_field_name("name")
+            names.append(n.text.decode() if n is not None else "")
+    return names
+
+
+def _path_arg_param(args: TSNode, param_names: set[str]) -> Optional[str]:
+    """The param flowing as a BARE argument into a ``.path(...)`` builder call (Spring
+    ``UriBuilder.path(String)``) inside ``args`` — the URL PATH specifically, preferred
+    over params feeding elsewhere in the same uri lambda (``.build(pathVariables)``)."""
+    stack = [args]
+    while stack:
+        n = stack.pop()
+        if n.type == "method_invocation":
+            name_node = n.child_by_field_name("name")
+            if name_node is not None and name_node.text.decode() == "path":
+                pargs = n.child_by_field_name("arguments")
+                if pargs is not None:
+                    for c in pargs.named_children:
+                        if c.type == "identifier" and c.text.decode() in param_names:
+                            return c.text.decode()
+        stack.extend(n.named_children)
+    return None
+
+
+def _param_flow(inv: TSNode, param_names: set[str]) -> Optional[str]:
+    """The parameter whose identifier flows as a BARE argument into ``inv``'s call — the
+    one-hop link (``uri(url)`` / ``b.path(url)``). A param used inside a ``binary_expression``
+    (a concatenation ``base + url``) is ASSEMBLY, not one clean hop -> None (honest gap)."""
+    args = inv.child_by_field_name("arguments")
+    if args is None:
+        return None
+    # When the uri lambda has a `.path(...)` builder, the PATH param feeds it; prefer
+    # that over any other param flowing elsewhere into the lambda (e.g. `.build(map)`).
+    path_param = _path_arg_param(args, param_names)
+    if path_param is not None:
+        return path_param
+    stack: list[tuple[TSNode, bool]] = [(args, False)]
+    while stack:
+        n, in_binary = stack.pop()
+        binary = in_binary or n.type == "binary_expression"
+        if n.type == "identifier" and not binary:
+            t = n.text.decode()
+            if t in param_names:
+                return t
+        for c in n.named_children:
+            stack.append((c, binary))
+    return None
+
+
+def _java_uri_helper(
+    method: TSNode, var_types: dict[str, str], import_fqn: dict[str, str]
+) -> Optional[UriHelper]:
+    """A method as a one-hop :class:`UriHelper`, or None. Qualifies when one of the
+    method's parameters flows into a RECOGNIZED (registered-origin) uri()/verb HTTP call
+    whose URL is NOT a call-site literal (the path comes one hop away)."""
+    name_node = method.child_by_field_name("name")
+    if name_node is None:
+        return None
+    param_names = _formal_param_names(method)
+    if not param_names:
+        return None
+    param_set = set(param_names)
+    stack = [method]
+    while stack:
+        n = stack.pop()
+        if n.type == "method_invocation":
+            hc = _java_http_call(n, var_types)
+            if hc is not None and hc.url_literal is None and call_verb(hc) is not None:
+                origin = import_fqn.get(hc.receiver_type) if hc.receiver_type else None
+                if is_recognized_call(hc.receiver_type or "", origin):
+                    flowing = _param_flow(n, param_set)
+                    if flowing is not None:
+                        return UriHelper(
+                            name=name_node.text.decode(),
+                            param_index=param_names.index(flowing),
+                            verb=call_verb(hc),
+                        )
+        stack.extend(n.named_children)
+    return None
+
+
+def _java_uri_helpers(
+    root: TSNode, var_types: dict[str, str], import_fqn: dict[str, str]
+) -> dict[str, UriHelper]:
+    """Every one-hop URL-forwarding helper in the file, keyed by method name."""
+    helpers: dict[str, UriHelper] = {}
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type in _METHOD_DECLS:
+            h = _java_uri_helper(n, var_types, import_fqn)
+            if h is not None:
+                helpers[h.name] = h
+        stack.extend(n.named_children)
+    return helpers
+
+
+def _java_helper_recoveries(
+    root: TSNode, helpers: dict[str, UriHelper]
+) -> list[DataflowRecovery]:
+    """Recover a call for every same-file UNQUALIFIED call site that passes a string
+    LITERAL at a known helper's flowing parameter index (strictly one hop)."""
+    out: list[DataflowRecovery] = []
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == "method_invocation" and n.child_by_field_name("object") is None:
+            name_node = n.child_by_field_name("name")
+            h = helpers.get(name_node.text.decode()) if name_node is not None else None
+            if h is not None:
+                args = n.child_by_field_name("arguments")
+                pos = list(args.named_children) if args is not None else []
+                if len(pos) > h.param_index and pos[h.param_index].type == "string_literal":
+                    out.append(
+                        DataflowRecovery(
+                            verb=h.verb,
+                            url_literal=pos[h.param_index].text.decode(),
+                            start_line=_line(n.start_point),
+                            end_line=_line(n.end_point),
+                        )
+                    )
+        stack.extend(n.named_children)
+    return out
+
+
 def _iter_java_files(root: Path):
     for p in sorted(root.rglob("*.java")):
         if p.is_file():
@@ -717,7 +1056,7 @@ def extract(root: Path | str, provenance: Provenance, repo_name: str | None = No
         source = path.read_bytes()
         tree = parser.parse(source)
         rel = path.relative_to(root).as_posix()
-        walker = _FileWalker(rel, source, tree.root_node, provenance)
+        walker = _FileWalker(rel, source, tree.root_node, provenance, source_path=path)
         walker.run()
         nodes.extend(walker.nodes)
         edges.extend(walker.edges)

@@ -327,7 +327,7 @@ agent는 사용자 작업공간을 공유한다.
 agent는 모호함을 드러내고, 작게 바꾸고, 증거로만 완료를 말하고, 사용자의 의도를 조용히 줄이지 않는다. 별것 아닌 듯 보이지만, 이 업계에서는 그게 꽤 높은 기준이다.
 <!-- ditto:managed:end -->
 
-<!-- ditto:knowledge:start sha256=13b8075b3acf179089ebcf7431c259fd3e3ade7edabbabfaa7ec735cf66d1236 -->
+<!-- ditto:knowledge:start sha256=90ed570cb709b2c7ef40e7b3079a9cb31259b3de7fb147bef145200d351f62e6 -->
 # DITTO Knowledge (projected — do not edit by hand)
 
 Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summary.
@@ -367,5 +367,6 @@ Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summ
 - ADR-20260713-ontology-framework-constructs-not-project-patterns · active · ADR-20260713-ontology-framework-constructs-not-project-patterns — 온톨로지 모델링 경계: 프레임워크/언어/표준 구성물만 1급, 프로젝트 자체 코드 패턴은 배제(정직한 gap) — ADR-20260712 host-neutral 정체성의 연장
 - ADR-20260713-sveltekit-routing-ontology · superseded · ADR-20260713-sveltekit-routing-ontology — SvelteKit 라우팅 온톨로지: 프레임워크-특정 1급 노드/엣지 + §4-3 override + 콜로케이션(제3의 cross-language 다리, SC-B와 직교)
 - ADR-20260714-code-quality-relate-curate-specialization · active · ADR-20260714-code-quality-relate-curate-specialization — F-Q4: 코드품질 이해·정규화는 Relate/Curate의 특화이지 새 최상위 정체성이 아니다
+- ADR-20260714-test-impact-runtime-coverage-overlay · active · ADR-20260714-test-impact-runtime-coverage-overlay — test-impact 정확도의 런타임 커버리지 보조 overlay: build-less·host-neutral·전이력 균일 3불변식을 producer-중립 load로 보존
 
 <!-- ditto:knowledge:end -->

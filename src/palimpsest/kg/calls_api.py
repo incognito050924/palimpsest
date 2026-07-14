@@ -34,6 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from palimpsest.extract.calls_api import RouteEnd, match_calls
+from palimpsest.extract.provenance import DATAFLOW, LITERAL
 from palimpsest.ir import EDGE_KIND_INFERRED
 
 # The matcher's provenance stamp (Decision 4): palimpsest is the generator, and the
@@ -46,7 +47,8 @@ _MODEL = "cross-tier-route-matcher/v1"
 _APICALLS = """
 MATCH (a:ApiCall)
 RETURN a.id AS id, a.qualified_name AS qualified_name,
-       a.committed_at AS committed_at, a.source_commit AS source_commit
+       a.committed_at AS committed_at, a.source_commit AS source_commit,
+       a.dataflow_derived AS dataflow_derived
 ORDER BY id
 """
 
@@ -68,6 +70,8 @@ SET r.edge_kind       = $edge_kind,
     r.confidence      = $confidence,
     r.matched_route   = $matched_route,
     r.candidate_count = $candidate_count,
+    r.transform       = $transform,
+    r.target_host     = $target_host,
     r.generator       = $generator,
     r.model           = $model,
     r.source_commit   = $source_commit,
@@ -85,11 +89,17 @@ class CallsApiLoadResult:
 
 
 def _route_end(row) -> RouteEnd:
+    # A dataflow-recovered ApiCall (marker persisted on the node, ac-4) carries the
+    # DATAFLOW transform so the matcher discounts its link below literal 1.0; every
+    # other node (direct-literal call, Endpoint) is LITERAL. Endpoints have no such
+    # marker, so they read LITERAL — inert, since the matcher only scores the CALL side.
+    transform = DATAFLOW if row.get("dataflow_derived") else LITERAL
     return RouteEnd(
         id=row["id"],
         qualified_name=row["qualified_name"],
         committed_at=row.get("committed_at"),
         source_commit=row.get("source_commit"),
+        transform=transform,
     )
 
 
@@ -102,6 +112,8 @@ def _write(session, m) -> None:
         confidence=m.confidence,
         matched_route=m.matched_route,
         candidate_count=m.candidate_count,
+        transform=m.transform,
+        target_host=m.target_host,
         generator=_GENERATOR,
         model=_MODEL,
         source_commit=m.source_commit,
@@ -109,21 +121,29 @@ def _write(session, m) -> None:
     )
 
 
-def load_calls_api(driver) -> CallsApiLoadResult:
+def load_calls_api(driver, proxy=None) -> CallsApiLoadResult:
     """Compute + load the inferred cross-tier CALLS_API layer (Decision 4).
 
     Queries every ``ApiCall`` and every ``Endpoint`` out of the graph, runs the pure
     :func:`palimpsest.extract.calls_api.match_calls` matcher over their canonical routes,
     and MERGEs one ``edge_kind='inferred'`` CALLS_API edge per route match — each carrying
-    its confidence, ``matched_route`` grounding, and ``candidate_count``. Entity-atomic
-    (both endpoints already resolved) and idempotent (MERGE on the edge pattern). Returns
-    the ApiCall / Endpoint counts and the number of edges merged.
+    its confidence, ``matched_route`` grounding, ``candidate_count``, and the resolution
+    ``transform`` / ``target_host`` provenance. Entity-atomic (both endpoints already
+    resolved) and idempotent (MERGE on the edge pattern). Returns the ApiCall / Endpoint
+    counts and the number of edges merged.
+
+    ``proxy`` (mechanism A, ``extract.proxy_config.ProxyRewrite``, threaded from the repo
+    root at ingest) is forwarded to the matcher so a front-end ``/api`` call resolves
+    through the repo's dev-proxy to reach the back-end route (wi_260713iah part 4). None
+    (the default) matches byte-identically to the pre-mechanism-A behavior.
     """
     with driver.session() as session:
         calls = [_route_end(r.data()) for r in session.run(_APICALLS)]
         endpoints = [_route_end(r.data()) for r in session.run(_ENDPOINTS)]
-        matches = match_calls(calls, endpoints)
-        for m in matches:
+        matches = match_calls(calls, endpoints, proxy=proxy)
+        # Deterministic MERGE order (concurrency finding): edges are written in a
+        # stable (src, dst) order so concurrent/repeated loads never race edge order.
+        for m in sorted(matches, key=lambda x: (x.source_id, x.target_id)):
             _write(session, m)
     return CallsApiLoadResult(
         api_calls=len(calls), endpoints=len(endpoints), loaded=len(matches)
