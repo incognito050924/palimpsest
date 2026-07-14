@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713oms",
+  "seq": 3,
+  "actor": "workspace-write",
+  "event_id": "c3f75136da66018d57313d23df204a1613070691446947fe0ed872b52b952e01",
+  "ts": "2026-07-13T06:43:52.406Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-1",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/extract/test_extract_rust.py::test_free_fn_is_function_contained_by_file",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

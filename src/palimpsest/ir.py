@@ -446,6 +446,12 @@ class Edge:
     src: str
     dst: str
     provenance: Provenance
+    # Per-edge resolution-precision marker ("typed" | "name" | None): how ``dst``
+    # was resolved for reference edges (CALLS/DEPENDS_ON). Orthogonal to
+    # ``edge_kind`` (deterministic/inferred) — a pure PROPERTY, set by the
+    # language extractor. Additive default so positional constructions keep
+    # working; None means unmarked (structural edges never carry it).
+    resolution: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -453,7 +459,20 @@ class Edge:
             "src": self.src,
             "dst": self.dst,
             "provenance": self.provenance.to_dict(),
+            "resolution": self.resolution,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Edge":
+        # Absent "resolution" -> "name": a pre-marker payload was in practice
+        # name-resolved, so backward-compat loads conservatively (never null).
+        return cls(
+            kind=data["kind"],
+            src=data["src"],
+            dst=data["dst"],
+            provenance=Provenance(**data["provenance"]),
+            resolution=data.get("resolution", "name"),
+        )
 
 
 @dataclass

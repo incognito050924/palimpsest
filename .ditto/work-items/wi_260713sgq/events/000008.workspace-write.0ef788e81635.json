@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713sgq",
+  "seq": 8,
+  "actor": "workspace-write",
+  "event_id": "0ef788e81635bfe38019cc19a7e23ee983e2890539e92a3a33fa2b50bb90a408",
+  "ts": "2026-07-13T07:16:32.045Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-6",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "python -m pytest tests/ -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

@@ -366,6 +366,7 @@ Durable project knowledge. Bodies live under `.ditto/knowledge/`; this is a summ
 - ADR-20260713-multilang-depends-on-name-local-boundary · active · ADR-20260713-multilang-depends-on-name-local-boundary — 다언어 추출: DEPENDS_ON은 정적 타입 언어에만 + name-based 해석의 언어-로컬 경계(SC-B)
 - ADR-20260713-ontology-framework-constructs-not-project-patterns · active · ADR-20260713-ontology-framework-constructs-not-project-patterns — 온톨로지 모델링 경계: 프레임워크/언어/표준 구성물만 1급, 프로젝트 자체 코드 패턴은 배제(정직한 gap) — ADR-20260712 host-neutral 정체성의 연장
 - ADR-20260713-sveltekit-routing-ontology · superseded · ADR-20260713-sveltekit-routing-ontology — SvelteKit 라우팅 온톨로지: 프레임워크-특정 1급 노드/엣지 + §4-3 override + 콜로케이션(제3의 cross-language 다리, SC-B와 직교)
+- ADR-20260714-code-quality-relate-curate-specialization · active · ADR-20260714-code-quality-relate-curate-specialization — F-Q4: 코드품질 이해·정규화는 Relate/Curate의 특화이지 새 최상위 정체성이 아니다
 - ADR-20260714-test-impact-runtime-coverage-overlay · active · ADR-20260714-test-impact-runtime-coverage-overlay — test-impact 정확도의 런타임 커버리지 보조 overlay: build-less·host-neutral·전이력 균일 3불변식을 producer-중립 load로 보존
 
 <!-- ditto:knowledge:end -->

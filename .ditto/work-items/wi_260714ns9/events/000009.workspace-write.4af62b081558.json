@@ -1,0 +1,12 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260714ns9",
+  "seq": 9,
+  "actor": "workspace-write",
+  "event_id": "4af62b081558cf9f373ef3341c4d5bb264874108cf5ba3b3036db34f8c7390db",
+  "ts": "2026-07-14T05:44:24.694Z",
+  "kind": "github_post",
+  "payload": {
+    "posted_decision_id": "9fe789d5bae763f3c4ba2accbd515759169fb733"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_2607132g5",
+  "title": "ingest 하드닝 — edge kind .format 보간에 REL_TYPES 멤버십 가드",
+  "source_request": "ingest 하드닝 — edge kind .format 보간에 REL_TYPES 멤버십 가드\n\n> #10 coverage 스윕(injection 카테고리)에서 발견한 load-bearing 불변식 미집행.\n\n## 문제\n`kg/ingest.py`의 노드 라벨 `.format` 보간에는 `NODE_LABELS` 부재시 KeyError 가드가 있다(ingest.py:256). 그런데 **edge `e.kind`의 `.format` 보간(ingest.py:284 근처)에는 대응하는 REL_TYPES 멤버십 가드가 없다.**\n\n## 현재 안전한 이유 (그리고 위험)\n오늘은 모든 extractor가 edge kind를 import한 상수(CONTAINS/CALLS/IMPORTS/DEPENDS_ON)에서만 set하므로 안전하다. 하지만 '엣지 kind는 상수'라는 불변식이 ingest 경계에서 **집행되지 않는다** — 향후 어떤 extractor가 파싱된 소스에서 edge kind를 파생시키면 injection 분석이 뒤집힌다.\n\n## 작업\n- edge kind 보간 직전에 REL_TYPES 멤버십 가드(노드 라벨 KeyError와 대칭) 추가 → fail-closed.\n- 회귀: 기존 ingest 테스트 불변.",
+  "goal": "ingest 하드닝 — edge kind .format 보간에 REL_TYPES 멤버십 가드",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "ac-1: ingest()가 양 끝점이 유효 노드인데 edge kind가 REL_TYPES에 없는 엣지를 만나면, Cypher .format 보간에 도달하기 전에 fail-closed로 예외를 발생시킨다 (노드 라벨 KeyError와 대칭)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/kg/test_ingest.py::test_unregistered_edge_kind_fails_closed_before_cypher -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "ac-2: 유효 edge kind(CONTAINS/CALLS/IMPORTS/DEPENDS_ON 등)는 불변 — 기존 kg ingest·extract 테스트 회귀 green",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/kg tests/extract -q",
+          "summary": "exit 0"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [],
+  "worktrees": [],
+  "github_issue": {
+    "repo": "incognito050924/palimpsest",
+    "number": 15
+  },
+  "risks": [],
+  "runs": [],
+  "started_at_sha": "cf5dfe471d120f3d762a9ea000c0895c5f6e3d3f",
+  "started_untracked_baseline": [
+    ".ditto/memory/events/memevt_retro_21405257835921a5.json",
+    ".ditto/work-items/wi_2607132g5/",
+    ".ditto/work-items/wi_260713mw8/"
+  ],
+  "created_at": "2026-07-13T05:04:47.655Z",
+  "updated_at": "2026-07-13T05:10:03.912Z",
+  "closed_at": "2026-07-13T05:10:03.912Z"
+}

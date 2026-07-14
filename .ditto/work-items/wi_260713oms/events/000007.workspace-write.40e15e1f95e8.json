@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713oms",
+  "seq": 7,
+  "actor": "workspace-write",
+  "event_id": "40e15e1f95e8770c0e136f153b7e7edcaa25e40ae3175b2e1927220a6cb28f12",
+  "ts": "2026-07-13T06:44:02.995Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-5",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/extract/test_extract_rust.py::test_inline_mod_path_prefix",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

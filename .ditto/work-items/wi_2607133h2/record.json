@@ -1,0 +1,82 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_2607133h2",
+  "title": "Summary 커버리지·응집 검증 (code→claim 갭) [seed]",
+  "source_request": "Summary 커버리지·응집 검증 (code→claim 갭) [seed]\n\n> **설계 스레드 [seed] · design-blocked.** 구현 큐 밖.\n> **SoT**: `docs/design-notes.md` 주제 **[B]**. 백로그 추적 항목(내용은 SoT).\n\n## 요지\n\nSummary 품질 3축 중 **Coverage/응집(code→claim: 요약이 코드를 다 담았나 / 코드가 한 가지만 하나)**이 없음. Faithfulness(claim→code)는 부분 있음(`semantic_verdict`), Freshness(시간축)는 shipped. Coverage만 미모델링.\n\n## 잠재 자료 (provider-free 가능)\n\n각 `SummaryClaim.source_refs` ∪ vs 대상 CONTAINS 자식 → **미커버 노드 = 커버리지 갭**을 **결정론적으로 계산 가능**(LLM 불필요, stale처럼 detect-only flag).\n\n## 열린 질문\n\ndesign-notes 주제 [B] §5: B-Q1(구조 지표 vs 외부 judge Risk vs 입도 정책) · B-Q2(갭 기준) · B-Q3(응집도 1급 표현 가치).\n\n## 관계\n\nF(코드품질 substrate, #1)의 F-Q5(측정 기준)와 축 겹침 — 함께 정리해야 중복 안 만듦.",
+  "goal": "Summary 커버리지·응집 검증 (code→claim 갭) [seed]",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "Running 'pytest tests/kg/test_summary.py -k coverage_verdict' passes: Summary.to_dict/from_dict return coverage_verdict unchanged and return None when the field is absent",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/kg/test_summary.py -k coverage_verdict -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "Running 'pytest tests/recall/test_recall_summaries.py -k coverage_verdict' passes: load_summaries returns rejected==0 for a coverage-verdict summary and recall() returns a summaries entry whose coverage_verdict equals the ingested dict while semantic_verdict is None",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/recall/test_recall_summaries.py -k coverage_verdict -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "Running 'pytest tests/test_cli_annotations.py' passes: _semantic_annotations returns a line containing 'coverage=' only when coverage_verdict is present and keeps a coverage-only entry",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/test_cli_annotations.py -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-4",
+      "statement": "Running 'pytest tests/kg tests/recall' exits 0 with 0 failed tests",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/kg tests/recall -q",
+          "summary": "exit 0"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [],
+  "worktrees": [],
+  "github_issue": {
+    "repo": "incognito050924/palimpsest",
+    "number": 6
+  },
+  "risks": [],
+  "runs": [],
+  "started_at_sha": "4cfef21eb4cede96ff9ccb6b28b4c0c5e1b08faa",
+  "started_untracked_baseline": [
+    ".ditto/memory/events/memevt_retro_21405257835921a5.json",
+    ".ditto/work-items/wi_2607132g5/",
+    ".ditto/work-items/wi_2607133h2/",
+    ".ditto/work-items/wi_260713mw8/",
+    ".ditto/work-items/wi_260713oms/",
+    ".ditto/work-items/wi_260713sgq/",
+    ".ditto/work-items/wi_260713sxs/",
+    ".ditto/work-items/wi_260713zlo/"
+  ],
+  "created_at": "2026-07-13T14:50:01.768Z",
+  "updated_at": "2026-07-13T15:07:49.918Z",
+  "closed_at": "2026-07-13T15:07:49.918Z"
+}

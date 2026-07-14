@@ -1,0 +1,123 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_2607134ma",
+  "title": "코드베이스 품질 이해·정규화 패턴·지속 가꾸기 (pre-compute substrate) — 설계 스레드 [seed]",
+  "source_request": "코드베이스 품질 이해·정규화 패턴·지속 가꾸기 (pre-compute substrate) — 설계 스레드 [seed]\n\n> **상태: seed / 미결 (발전 후 앵커).** 아직 결정 아님. 조기 잠금 금지 — 동기·관계·열린 질문만. 범위·메커니즘이 정의되면 ADR로 승격.\n> **SoT**: `docs/design-notes.md` 주제 [F]. 이 이슈는 그 백로그 추적 항목이다.\n\n## 동기 (사용자 제기 2026-07-12)\n\npalimpsest(그리고 AI 에이전트)가 코드베이스를 **잘 이해**하려면 **코드베이스 품질 = 이해하기 쉬운 구조**가 전제다. 따라서 palimpsest는 코드베이스의 특성을 이해하고 **정규화된 패턴을 제공**하여 구조를 **지속적으로 가꿔나갈** 수 있게 하는 역할이 필요하다.\n\n`incognito050924/ditto#9`(\"ACG 개선 — Meta의 pre-compute\")에서 Meta 기법 중 **pre-compute**(Glean식 정규화·질의가능 코드-팩트 색인)를 언급한 진짜 동기가 이것 — 성능 최적화가 아니라 **정규화된 코드베이스 이해 substrate**.\n\n## 관계\n\n- **ditto#9의 palimpsest측 동기.** ditto ACG는 소비자, palimpsest는 이해·정규화 substrate를 소유(환경 비종속 유지, `ADR-20260712`).\n- **substrate 후보 = build-less tree-sitter 정밀 spine**(design-notes 주제 C / 재검토 백로그 T9). Glean식 pre-computed 질의가능 색인. CodeQL은 빌드 의존이라 substrate 부적합(트릴레마, `ADR-20260706 §결정6` — 도입 아님·옵션 보조).\n- **\"정규화된 패턴 제공 + 가꾸기\"**는 단순 팩트 노출을 넘어 생성형 큐레이션의 코드-품질 적용일 수 있음(정체성 축 B).\n\n## 열린 질문\n\n- **F-Q1**: palimpsest가 제공하는 \"정규화된 패턴\"의 산출물은? (구조 메트릭 / 이해도 신호 / 안티패턴 / 리팩터 후보?)\n- **F-Q2**: \"가꾸기\"의 주체·경계 — palimpsest는 이해·신호 substrate만 제공하고 실제 변경은 소비자(ditto ACG/개발자)가? (환경 비종속·advisory 정합)\n- **F-Q3**: pre-compute 색인 형태 — 기존 KG(Neo4j projection) 위 충분 vs 별도 Glean식 색인? (git=SoT·재구축 결정론 유지)\n- **F-Q4**: 새 최상위 목적(정체성)인가, 기존 Relate/Curate의 코드-품질 특화 적용인가? (앵커 위상)\n- **F-Q5**: \"코드베이스 품질\"의 측정 가능한 정의 — 무엇을 \"이해하기 쉬운 구조\"로 볼지 정규화 기준.\n\n## 다음 단계\n\n범위(F-Q1/F-Q2/F-Q4)가 정해지면 ADR로 승격. 그 전까지 주제 C(spine)·D(test-impact)·ditto#9와 함께 발전.",
+  "goal": "Java의 name-based로 해석된(저정밀) CALLS/DEPENDS_ON 엣지를, 이미 만든 per-edge resolution 마커(Edge.resolution=typed|name)를 소비해 근거결박 관측(출처+gap+confidence)으로 flag하는 Relate detect-only 품질 신호를, 기존 KG projection 위 결정론적으로 산출하고 질의 표면으로 노출한다 (이슈 #1 umbrella의 첫 facet 증분).",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "name-resolved Java CALLS/DEPENDS_ON 엣지가 저정밀으로 결정론적 flag된다 (Edge.resolution=name 소비, 동일 입력 동일 출력)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_2607134ma/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "각 flag가 근거결박 관측(출처+gap+confidence)으로 노출되고 내부 content-verdict가 아니다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_2607134ma/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command"
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "신호가 관측 가능한 질의 표면으로 노출되어 실제 Java KG 데이터에서 결과를 반환한다 (dead facet 아님)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_2607134ma/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [
+    "src/palimpsest/recall/graphrag.py",
+    "src/palimpsest/recall/__init__.py",
+    "src/palimpsest/cli.py",
+    "tests/recall/test_recall_edge_precision.py"
+  ],
+  "worktrees": [],
+  "github_issue": {
+    "repo": "incognito050924/palimpsest",
+    "number": 1
+  },
+  "risks": [],
+  "re_entry": {
+    "command": "git checkout -b feat/edge-precision-signal && git add src/palimpsest/recall/graphrag.py src/palimpsest/recall/__init__.py src/palimpsest/cli.py tests/recall/test_recall_edge_precision.py && git commit",
+    "fresh_evidence_needed": [
+      "사용자의 커밋/푸시 승인 (비가역 결정). 코드는 검증 완료(3/3 AC verified-by-evidence, live Neo4j 포함, recall 스위트 102 passed)됐으나 미랜딩: recall/graphrag.py, recall/__init__.py, cli.py, tests/recall/test_recall_edge_precision.py"
+    ]
+  },
+  "runs": [],
+  "started_at_sha": "1b1e90d7bc579a9b8620c2e0de0212268c32d8bd",
+  "started_untracked_baseline": [
+    ".ditto/knowledge/adr/ADR-20260714-code-quality-relate-curate-specialization.md",
+    ".ditto/memory/events/memevt_retro_21405257835921a5.json",
+    ".ditto/memory/events/memevt_retro_3a4ad9679866be63.json",
+    ".ditto/memory/events/memevt_retro_76c02f447e6af820.json",
+    ".ditto/work-items/wi_2607132g5/",
+    ".ditto/work-items/wi_2607133h2/",
+    ".ditto/work-items/wi_2607134ma/",
+    ".ditto/work-items/wi_260713bz4/",
+    ".ditto/work-items/wi_260713mw8/",
+    ".ditto/work-items/wi_260713oms/",
+    ".ditto/work-items/wi_260713sgq/",
+    ".ditto/work-items/wi_260713sxs/",
+    ".ditto/work-items/wi_260713zlo/",
+    "tests/recall/test_recall_edge_precision.py"
+  ],
+  "created_at": "2026-07-13T23:47:40.735Z",
+  "updated_at": "2026-07-14T01:09:38.995Z",
+  "closed_at": "2026-07-14T01:09:38.995Z"
+}

@@ -1,0 +1,78 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_260713zlo",
+  "title": "tests/e2e collection 깨짐: No module named 'tests' (선행 결함, #7·#9 무관)",
+  "source_request": "tests/e2e collection 깨짐: No module named 'tests' (선행 결함, #7·#9 무관)\n\n## 증상\n`uv run pytest` 전체 수집 시 `tests/e2e/test_reconcile_e2e.py`가 collection 단계에서 실패:\n```\nfrom tests.e2e.conftest import ... → ModuleNotFoundError: No module named 'tests'\n```\n\n## 성격\n- **선행 결함** — #7(test-impact)·#9(다언어)와 무관. 해당 브랜치들이 `tests/e2e/`를 건드리지 않음(`git diff --name-only` 확인).\n- `tests/` 패키지 해석 문제(루트 `tests/__init__.py` 부재 또는 pytest rootdir/pythonpath 설정 누락)로 추정.\n\n## 영향\n- 전체 `uv run pytest` 완주를 막음. 현재 autopilot 배리어는 `tests/extract`(infra-free)만 쓰고, push_gate는 `--ignore=tests/e2e`로 우회 가능하므로 **즉시 차단은 아님**.\n- 다만 CI/전체 스위트 신뢰도를 위해 별도 수정 필요.\n\n## 제안 수정(최소)\n`tests/__init__.py` 추가 또는 `pyproject.toml`의 `[tool.pytest.ini_options]`에 `pythonpath`/`rootdir`/`importmode` 정합. 원인 재현 후 최소 패치.",
+  "goal": "tests/e2e collection 깨짐: No module named 'tests' (선행 결함, #7·#9 무관)",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "plain pytest(python -m 아님)로 tests/e2e/test_reconcile_e2e.py 수집이 ModuleNotFoundError 없이 성공한다 (pytest tests/e2e/test_reconcile_e2e.py --collect-only 가 exit 0, 7 tests collected)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "pytest tests/e2e/test_reconcile_e2e.py --collect-only -q",
+          "summary": "exit 0"
+        },
+        {
+          "kind": "command",
+          "command": "pytest tests/e2e/test_reconcile_e2e.py --collect-only -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "pyproject.toml [tool.pytest.ini_options] pythonpath에 레포 루트가 포함되어 tests.* import가 러너 무관하게 해석된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "python -c import tomllib;p=tomllib.load(open('pyproject.toml','rb'));pp=p['tool']['pytest']['ini_options']['pythonpath'];assert '.' in pp, pp;print('pythonpath OK:',pp)",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "전체 스위트 pytest tests/ 가 회귀 없이 통과한다 (실행 로그)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "pytest tests/ -q",
+          "summary": "exit 0"
+        },
+        {
+          "kind": "command",
+          "command": "pytest tests/ -q",
+          "summary": "exit 0"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [],
+  "worktrees": [],
+  "github_issue": {
+    "repo": "incognito050924/palimpsest",
+    "number": 16
+  },
+  "risks": [],
+  "runs": [],
+  "started_at_sha": "2f602aadf2953b36334c5812aaf8a89842fbf17f",
+  "started_untracked_baseline": [
+    ".ditto/memory/events/memevt_retro_21405257835921a5.json",
+    ".ditto/work-items/wi_2607132g5/",
+    ".ditto/work-items/wi_260713mw8/",
+    ".ditto/work-items/wi_260713oms/",
+    ".ditto/work-items/wi_260713sgq/",
+    ".ditto/work-items/wi_260713zlo/"
+  ],
+  "created_at": "2026-07-13T08:09:21.587Z",
+  "updated_at": "2026-07-13T08:16:08.241Z",
+  "closed_at": "2026-07-13T08:16:08.240Z"
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713bz4",
+  "seq": 13,
+  "actor": "workspace-write",
+  "event_id": "66898db0bd2489637a43c1153056b0dea27fe63ca70d632d831caa092c7620cb",
+  "ts": "2026-07-13T21:28:16.753Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-4",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "file",
+        "path": ".ditto/local/runs/wi_260713bz4/coverage.json",
+        "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/extract/ -q",
+        "summary": "156 passed, exit 0 (fresh run)"
+      },
+      {
+        "kind": "file",
+        "path": "src/palimpsest/extract/java.py",
+        "summary": "_precise 616-626 + _calls_edges seed 641-665 (unnarrowed seed marked typed) vs _depends_on_edges 515-526 (seed narrowed) — the ac-2 gap"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -c 'extract+compute_communities twice, assert run1==run2'",
+        "summary": "run1==run2: True"
+      }
+    ]
+  }
+}

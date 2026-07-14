@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713sgq",
+  "seq": 5,
+  "actor": "workspace-write",
+  "event_id": "3b402dd40c855831b941ff5726b4696c1c1af1fd2b8b583c4552c2f256c224c2",
+  "ts": "2026-07-13T07:15:38.555Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-3",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "python -m pytest tests/extract/test_dispatch.py::test_dispatch_ecmascript_unified_and_scb -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

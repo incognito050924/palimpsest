@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713mw8",
+  "seq": 8,
+  "actor": "workspace-write",
+  "event_id": "ce4868f0b0f7a93d7a5ad20efeab3cf50a01a69f8a82421a70e0d63c7a7812bb",
+  "ts": "2026-07-13T04:18:00.332Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-6",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "file",
+        "path": ".ditto/local/runs/wi_260713mw8/coverage.json",
+        "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest -q",
+        "summary": "226 passed, 0 fail/error/skip, exit 0, 50.5s (testcontainers Neo4j live 포함)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/kg/test_community.py tests/kg/test_ingest.py -q",
+        "summary": "14 passed exit 0 — Java/Kotlin community 클러스터링·FUNCTION 왕복·재적재 멱등·partition 불변식"
+      },
+      {
+        "kind": "command",
+        "command": "git diff --stat HEAD; grep -c VARIABLE src/palimpsest/kg/community.py",
+        "summary": "community.py 변경목록에 없음; VARIABLE grep=0 (union-find inert)"
+      }
+    ]
+  }
+}

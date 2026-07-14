@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713bz4",
+  "seq": 2,
+  "actor": "workspace-write",
+  "event_id": "068c2b30c5adc661452012d309bd19ac554604c93d436fabdc6a292ce78c95fc",
+  "ts": "2026-07-13T21:25:51.969Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-1",
+    "verdict": "partial",
+    "evidence": [
+      {
+        "kind": "file",
+        "path": ".ditto/local/runs/wi_260713bz4/coverage.json",
+        "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/extract/ -q",
+        "summary": "156 passed, exit 0 (fresh run)"
+      },
+      {
+        "kind": "file",
+        "path": "src/palimpsest/extract/java.py",
+        "summary": "_precise 616-626 + _calls_edges seed 641-665 (unnarrowed seed marked typed) vs _depends_on_edges 515-526 (seed narrowed) — the ac-2 gap"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/extract/test_edge_resolution_marker.py -q",
+        "summary": "round-trip + projection-row/merge tests pass"
+      }
+    ]
+  }
+}

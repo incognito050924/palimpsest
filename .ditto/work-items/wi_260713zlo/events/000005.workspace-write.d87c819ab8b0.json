@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713zlo",
+  "seq": 5,
+  "actor": "workspace-write",
+  "event_id": "d87c819ab8b006410ccb153edb5d653bf6ec3ea6b76486fc59a044f0158a11c4",
+  "ts": "2026-07-13T08:12:44.717Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-3",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "pytest tests/ -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

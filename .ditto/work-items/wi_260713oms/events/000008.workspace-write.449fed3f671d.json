@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713oms",
+  "seq": 8,
+  "actor": "workspace-write",
+  "event_id": "449fed3f671df3c0a9499ad08b11176fc5fe1d2f912500f64dff55b764dc19ed",
+  "ts": "2026-07-13T06:44:19.543Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-6",
+    "verdict": "fail",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/kg tests/extract/test_extract_java.py tests/extract/test_extract_kotlin.py tests/extract/test_extract_python.py",
+        "summary": "exit 4"
+      }
+    ]
+  }
+}

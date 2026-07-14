@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_2607133h2",
+  "seq": 4,
+  "actor": "workspace-write",
+  "event_id": "b4b907a8757173735bbc0ed949e3084f270b9214493f246e2be55b0c9193caf8",
+  "ts": "2026-07-13T15:07:19.526Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-2",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/recall/test_recall_summaries.py -k coverage_verdict -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

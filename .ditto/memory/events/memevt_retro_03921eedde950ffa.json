@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1.0",
+  "event_id": "memevt_retro_03921eedde950ffa",
+  "event_type": "analysis",
+  "actor": {
+    "kind": "agent",
+    "role": "retrospective"
+  },
+  "text": "[residual] If host later wraps curate as a service, the write path has no caller auth of its own.\n[residual] Unguarded write into shared KG; if palimpsest ever runs multi-tenant this is unauthorized-by-default.\n[residual] Multi-user deployment would need an owner/scope on who may materialize inferred summaries.\n[residual] The provenance-key same-id divergent-content overwrite is real but is a data-integrity/idempotency issue, tracked there.\n[residual] code-derived facts are sent to a 3rd-party model (confidentiality), but not regulatory; carried under pii-leak/secret.\n[residual] Partial rollout across loader versions or missing optional-dep fails loudly at first generation, not silently.\n[residual] created_at stored without format/range validation could mislead downstream freshness ordering.\n[close_reason] No principal/identity auth introduced; only env ANTHROPIC_API_KEY (SDK-internal) + host-injected driver. No auth mechanism implemented.\n[close_reason] No access-control layer exists or is added; inferred layer is designed write-open + honestly-labeled. What guards the write is grounding + provenance honesty, not authz.\n[close_reason] Single-user local opt-in CLI; no permission model stated or required by intent/ADR.\n[close_reason] Single-shot CLI, one sequential session, no threads/locks. summary_id_unique constraint neutralizes the MERGE race. The provenance-key filename overwrite is single-threaded (belongs to data-integrity, not concurrency).\n[close_reason] Java code-structure metadata domain; no PII/regulated data; no compliance obligation stated.\n[close_reason] Opt-in subcommand NOT in default pipeline; curate/anthropic optional-dep, lazy import; new gap key already ignored by loader (ir.py:540).\n[close_reason] created_at is opaque caller ISO-8601 passthrough, not an input to summary_id; code_bound_at from existing committed_at. No new time math.\n[evidence] file: .ditto/local/runs/wi_260714ns9/coverage.json\n[evidence] file: .ditto/local/runs/wi_260714ns9/coverage.json\n[evidence] file: .ditto/local/runs/wi_260714ns9/coverage.json",
+  "created_at": "2026-07-14T05:45:40.849Z",
+  "status": "pending",
+  "sources": [],
+  "confidence_kind": "EXTRACTED",
+  "sensitivity": "internal",
+  "governs": []
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713sgq",
+  "seq": 7,
+  "actor": "workspace-write",
+  "event_id": "efcaedbda42b7321519548d0a79f19b8f10c80d7547545ab717e6af2da1d2b22",
+  "ts": "2026-07-13T07:15:39.039Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-5",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "python -m pytest tests/extract/test_dispatch.py::test_dispatch_single_repo_node tests/extract/test_dispatch.py::test_dispatch_community_deterministic -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

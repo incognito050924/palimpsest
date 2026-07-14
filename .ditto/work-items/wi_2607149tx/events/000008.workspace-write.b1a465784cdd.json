@@ -1,0 +1,13 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_2607149tx",
+  "seq": 8,
+  "actor": "workspace-write",
+  "event_id": "b1a465784cdd949c5816144fc8e32440e847af56d26fb064854a568f02067519",
+  "ts": "2026-07-14T02:03:51.783Z",
+  "kind": "claim_release",
+  "payload": {
+    "claimed_branch": "feat/edge-precision-signal",
+    "posted_claim_marker": "claim:feat/edge-precision-signal"
+  }
+}

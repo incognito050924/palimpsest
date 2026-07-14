@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713zlo",
+  "seq": 7,
+  "actor": "workspace-write",
+  "event_id": "f69afd4432eee0bbd307f5e373abd9eef6cf153334d15c673fc1ffb38ce7fd87",
+  "ts": "2026-07-13T08:15:57.164Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-3",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "pytest tests/ -q",
+        "summary": "exit 0"
+      },
+      {
+        "kind": "command",
+        "command": "pytest tests/ -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

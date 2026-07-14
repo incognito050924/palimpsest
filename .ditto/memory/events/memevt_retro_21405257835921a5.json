@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1.0",
+  "event_id": "memevt_retro_21405257835921a5",
+  "event_type": "analysis",
+  "actor": {
+    "kind": "agent",
+    "role": "retrospective"
+  },
+  "text": "[residual] 훗날 인증 필요한 서비스 뒤로 노출되면 문제될 수 있으나 현재 범위 밖\n[residual] Neo4j 쓰기 인가는 드라이버/DB 설정 몫, 향후 read API시 필요할 수 있으나 범위 밖\n[residual] 그래프 열람 통제 모델은 별도 결정, 이 변경이 건드리지 않음\n[residual] ingest 조작감사 로그 없으나 재빌드 결정론·멱등으로 복구 가능\n[residual] 엔드포인트 없는 엣지 무성드롭은 경쟁 아닌 data-integrity 도메인 사안\n[residual] 거대·초깊이 파일 고갈 여지는 resource-exhaustion에서 다룸\n[residual] 향후 소스에서 라벨/rel 파생시 인젝션 싱크 가능하나 오늘 라벨은 전부 코드 상수\n[residual] 변수명이 시크릿 존재 암시 가능하나 값 아님, author 신원은 기존 미변경 동작\n[residual] author provenance PII는 기존 extractor의 미변경 동작, 이 변경이 표면 안 넓힘\n[residual] author 신원 보존 규제 여지는 사전-존재, 이 변경이 표면 안 넓힘\n[residual] committed_at은 DesignDecision bi-temporal freshness용이나 그 계층 미변경\n[close_reason] 빌드타임 정적분석 라이브러리, 요청 진입점·세션·토큰·인증 경로 없음\n[close_reason] 권한 요구·부여·검사 코드경로 없음, IR 생성·MERGE는 인가 지점 없는 결정론 빌드\n[close_reason] 제품 인가 모델 미정의·미변경, 순수 additive 온톨로지 확장\n[close_reason] 부인방지 사용자 액션 없음, 빌드 결정론·멱등, provenance 이미 결박\n[close_reason] 단일스레드 in-memory 빌드+단일 쓰기tx, 새 병렬성·락 없음, nodes-before-edges 기존 패턴\n[close_reason] 요청흐름·레이트리미터·쿼터·외부 엔드포인트 없는 빌드타임 라이브러리\n[close_reason] 소스파생 문자열 전부 $rows 파라미터, .format 보간은 NODE_LABELS/REL_TYPES 고정상수뿐, Node 리터럴값 필드 없음, eval/명령 싱크 없음\n[close_reason] Node에 리터럴 값 필드 없음, VARIABLE는 변수명만 담고 값 미적재, 시크릿 노출 코드 미추가\n[close_reason] 코드 식별자·구조 엣지만 수집, Node 리터럴값 필드 없어 PII 리터럴 미적재\n[close_reason] 사내 정적분석 개발도구 additive 확장, 신규 개인데이터 수집·보존·동의 흐름 없음\n[close_reason] correctness가 시간 미의존, TTL·만료·타임존·monotonic 로직 미도입, 타임스탬프는 git provenance 통과값",
+  "created_at": "2026-07-13T04:17:49.337Z",
+  "status": "pending",
+  "sources": [],
+  "confidence_kind": "EXTRACTED",
+  "sensitivity": "internal",
+  "governs": []
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713zlo",
+  "seq": 4,
+  "actor": "workspace-write",
+  "event_id": "e68aaa878f2532e70a4aecd16e146c4ab58101af432391cfe9f77b31573f80ce",
+  "ts": "2026-07-13T08:11:35.273Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-2",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "python -c import tomllib;p=tomllib.load(open('pyproject.toml','rb'));pp=p['tool']['pytest']['ini_options']['pythonpath'];assert '.' in pp, pp;print('pythonpath OK:',pp)",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

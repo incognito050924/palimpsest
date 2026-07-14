@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_2607133h2",
+  "seq": 6,
+  "actor": "workspace-write",
+  "event_id": "cca293ede0f8bb25441855ec0bcfce6366d10f5e5700052e4ff12e69799e3cae",
+  "ts": "2026-07-13T15:07:45.321Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-4",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/kg tests/recall -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

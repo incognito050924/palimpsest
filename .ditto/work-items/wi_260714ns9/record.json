@@ -1,0 +1,220 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_260714ns9",
+  "title": "이슈#1 facet3: Curate 합성 (Relate 팩트 → 리팩터 후보)",
+  "source_request": "우선순위 네가 정해서 이어서 해 → Curate 합성 (deep-interview로 스코핑). 명명 일관성은 Java 코퍼스에서 vacuous, 응집은 #6 소유로 확인되어 Curate 합성을 다음 방향으로 사용자 선택.",
+  "goal": "이슈 #1 Curate 합성 첫 슬라이스: 격리 opt-in palimpsest.curate 모듈이 복합 신호(저정밀 recall_edge_precision AND 저지역성 recall_callgraph_locality)를 가진 Java Method를 대상으로, host-위임 LLM producer(host가 LLM 제공, curate는 추출 계약만 — memory-extractor 패턴)로 근거결박 리팩터-후보 payload를 생성하고, git-tracked SoT로 선물질화한 뒤 기존 멱등 inferred 로더로 적재한다. content-verdict는 외부 유지(합성만, 자기인증 금지). 이슈 #1 umbrella의 세번째 facet(첫 Curate 축 실현).",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "격리된 palimpsest.curate 모듈이 recall/load surface를 import하지 않고(path-scoped provider-free probe green 유지) 복합 신호(저정밀 AND 저지역성) Java Method를 식별해 host-위임 LLM producer용 추출 targets(대상+grounding)를 emit한다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260714ns9/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/ -q",
+          "summary": "전체 464 passed, 0 failed (live Neo4j testcontainers 포함)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/recall/test_recall_composite.py tests/kg/test_curate_integration.py -q",
+          "summary": "composite recall 5(mock+live) + curate integration 5(live) passed"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/recall/graphrag.py",
+          "lines": {
+            "start": 1543,
+            "end": 1637
+          },
+          "summary": "recall_refactor_candidates + _REFACTOR_CANDIDATES 단일 composite 질의 + standing/absent gap"
+        },
+        {
+          "kind": "note",
+          "summary": "Fresh-context ditto:verifier final_verdict=pass; ac-1/2/3 pass; scope creep 없음; _cmd_curate 회귀 없음; git diff HEAD -- src/palimpsest/kg/summary.py empty(로더 무변경)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/curate/ tests/recall/test_recall_composite.py tests/kg/test_curate_integration.py -q",
+          "summary": "40 passed (live Neo4j testcontainers 포함) — fresh-context verifier 실행"
+        },
+        {
+          "kind": "note",
+          "summary": "ditto:verifier(별도 컨텍스트) final_verdict=pass. 로더 무변경: git diff HEAD -- src/palimpsest/kg/summary.py empty. composite 선택 결정론·provider-free, honest empty-live 정확 처리."
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "생성된 리팩터-후보 payload가 근거결박(grounding refs + gap + confidence)이고 content-verdict(참/거짓 판정)를 포함하지 않으며 git-tracked SoT로 선물질화된다(결정론적 id, LLM 출력 동결)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260714ns9/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/ -q",
+          "summary": "전체 464 passed, 0 failed (live Neo4j testcontainers 포함)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/recall/test_recall_composite.py tests/kg/test_curate_integration.py -q",
+          "summary": "composite recall 5(mock+live) + curate integration 5(live) passed"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/recall/graphrag.py",
+          "lines": {
+            "start": 1543,
+            "end": 1637
+          },
+          "summary": "recall_refactor_candidates + _REFACTOR_CANDIDATES 단일 composite 질의 + standing/absent gap"
+        },
+        {
+          "kind": "note",
+          "summary": "Fresh-context ditto:verifier final_verdict=pass; ac-1/2/3 pass; scope creep 없음; _cmd_curate 회귀 없음; git diff HEAD -- src/palimpsest/kg/summary.py empty(로더 무변경)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/curate/ tests/recall/test_recall_composite.py tests/kg/test_curate_integration.py -q",
+          "summary": "40 passed (live Neo4j testcontainers 포함) — fresh-context verifier 실행"
+        },
+        {
+          "kind": "note",
+          "summary": "ditto:verifier(별도 컨텍스트) final_verdict=pass. 로더 무변경: git diff HEAD -- src/palimpsest/kg/summary.py empty. composite 선택 결정론·provider-free, honest empty-live 정확 처리."
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "기존 멱등 inferred 로더가 물질화된 payload를 edge_kind=inferred로 적재하고(sha256 id + MERGE, drop→reload 동일 재현) generator/model provenance가 실제 생성 모델을 정직히 기록한다(자기귀속 금지)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260714ns9/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/ -q",
+          "summary": "전체 464 passed, 0 failed (live Neo4j testcontainers 포함)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/recall/test_recall_composite.py tests/kg/test_curate_integration.py -q",
+          "summary": "composite recall 5(mock+live) + curate integration 5(live) passed"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/recall/graphrag.py",
+          "lines": {
+            "start": 1543,
+            "end": 1637
+          },
+          "summary": "recall_refactor_candidates + _REFACTOR_CANDIDATES 단일 composite 질의 + standing/absent gap"
+        },
+        {
+          "kind": "note",
+          "summary": "Fresh-context ditto:verifier final_verdict=pass; ac-1/2/3 pass; scope creep 없음; _cmd_curate 회귀 없음; git diff HEAD -- src/palimpsest/kg/summary.py empty(로더 무변경)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/curate/ tests/recall/test_recall_composite.py tests/kg/test_curate_integration.py -q",
+          "summary": "40 passed (live Neo4j testcontainers 포함) — fresh-context verifier 실행"
+        },
+        {
+          "kind": "note",
+          "summary": "ditto:verifier(별도 컨텍스트) final_verdict=pass. 로더 무변경: git diff HEAD -- src/palimpsest/kg/summary.py empty. composite 선택 결정론·provider-free, honest empty-live 정확 처리."
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [
+    ".ditto/knowledge/CONTEXT.md",
+    ".ditto/knowledge/adr/ADR-20260714-code-quality-relate-curate-specialization.md",
+    ".ditto/knowledge/knowledge.json",
+    ".ditto/local/work-items/wi_260714ns9/completion.json",
+    ".ditto/local/work-items/wi_260714ns9/work-item.json",
+    ".ditto/memory/events/memevt_retro_21405257835921a5.json",
+    ".ditto/memory/events/memevt_retro_3a25c63a199ad689.json",
+    ".ditto/memory/events/memevt_retro_3a4ad9679866be63.json",
+    ".ditto/memory/events/memevt_retro_76c02f447e6af820.json",
+    ".ditto/work-items/wi_2607132g5/",
+    ".ditto/work-items/wi_2607133h2/",
+    ".ditto/work-items/wi_2607134ma/",
+    ".ditto/work-items/wi_260713bz4/",
+    ".ditto/work-items/wi_260713mw8/",
+    ".ditto/work-items/wi_260713oms/",
+    ".ditto/work-items/wi_260713sgq/",
+    ".ditto/work-items/wi_260713sxs/",
+    ".ditto/work-items/wi_260713zlo/",
+    ".ditto/work-items/wi_2607149tx/",
+    ".ditto/work-items/wi_260714ns9/",
+    "CLAUDE.md",
+    "src/palimpsest/recall/graphrag.py",
+    "src/palimpsest/recall/__init__.py",
+    "src/palimpsest/curate/producer.py",
+    "src/palimpsest/cli.py",
+    "tests/recall/test_recall_composite.py",
+    "tests/curate/test_curate_composite.py",
+    "tests/curate/test_llm_contract.py",
+    "tests/kg/test_curate_integration.py"
+  ],
+  "worktrees": [],
+  "declared_risk": {
+    "non_local": true
+  },
+  "follow_ups": [
+    {
+      "kind": "idea",
+      "note": "composite Curate live positive witness 확보: name-resolved CALLS 또는 unresolved 콜이 실제 존재하는 더 크거나 덜 정제된 Java 코퍼스(또는 다언어 spine 증분2)로 검증. 현 commute 픽스처는 1b1e90d 정밀화로 저정밀 CALLS가 0이라 composite가 구조적 공집합 — 메커니즘은 빌드되나 live positive witness 없음."
+    }
+  ],
+  "github_issue": {
+    "repo": "incognito050924/palimpsest",
+    "number": 1
+  },
+  "risks": [],
+  "re_entry": {
+    "command": "# resolve the land blocker, then re-run: ditto autopilot complete --workItem wi_260714ns9",
+    "fresh_evidence_needed": [
+      "land aborted — 130 working-tree path(s) outside the declared change_surface: .: .ditto/work-items/wi_2607132g5/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_2607132g5/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_2607132g5/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_2607132g5/events/000003.workspace-write.ef19d42ecadc.json, .ditto/work-items/wi_2607132g5/events/000004.workspace-write.f0a72ad1eee7.json, .ditto/work-items/wi_2607132g5/events/000005.workspace-write.7299da5a80d9.json, .ditto/work-items/wi_2607132g5/events/000006.workspace-write.d22029f6f722.json, .ditto/work-items/wi_2607132g5/record.json, .ditto/work-items/wi_2607133h2/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_2607133h2/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_2607133h2/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_2607133h2/events/000003.workspace-write.a64f953050de.json, .ditto/work-items/wi_2607133h2/events/000004.workspace-write.b4b907a87571.json, .ditto/work-items/wi_2607133h2/events/000005.workspace-write.fe2a7ba9c2e2.json, .ditto/work-items/wi_2607133h2/events/000006.workspace-write.cca293ede0f8.json, .ditto/work-items/wi_2607133h2/events/000007.workspace-write.58931f65ee3d.json, .ditto/work-items/wi_2607133h2/events/000008.workspace-write.a540042a5a85.json, .ditto/work-items/wi_2607133h2/record.json, .ditto/work-items/wi_2607134ma/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_2607134ma/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_2607134ma/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_2607134ma/events/000003.workspace-write.ad078849898b.json, .ditto/work-items/wi_2607134ma/events/000004.workspace-write.66378c3ed914.json, .ditto/work-items/wi_2607134ma/events/000005.workspace-write.208adf4b51a5.json, .ditto/work-items/wi_2607134ma/events/000006.workspace-write.de05ad34bbb2.json, .ditto/work-items/wi_2607134ma/events/000007.workspace-write.c8ca75fc694c.json, .ditto/work-items/wi_2607134ma/events/000008.workspace-write.a540042a5a85.json, .ditto/work-items/wi_2607134ma/events/000009.workspace-write.8de4eafd0320.json, .ditto/work-items/wi_2607134ma/events/000010.workspace-write.b13c71a2c042.json, .ditto/work-items/wi_2607134ma/events/000011.workspace-write.ac2956b8affb.json, .ditto/work-items/wi_2607134ma/record.json, .ditto/work-items/wi_260713bz4/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713bz4/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713bz4/events/000002.workspace-write.068c2b30c5ad.json, .ditto/work-items/wi_260713bz4/events/000003.workspace-write.2f9b5caacdc9.json, .ditto/work-items/wi_260713bz4/events/000004.workspace-write.df3538b483b8.json, .ditto/work-items/wi_260713bz4/events/000005.workspace-write.600191244f7c.json, .ditto/work-items/wi_260713bz4/events/000006.workspace-write.3f803158119c.json, .ditto/work-items/wi_260713bz4/events/000007.workspace-write.a47034530f93.json, .ditto/work-items/wi_260713bz4/events/000008.workspace-write.a996e9c0e699.json, .ditto/work-items/wi_260713bz4/events/000009.workspace-write.29eec21aaed2.json, .ditto/work-items/wi_260713bz4/events/000010.workspace-write.3c4c56191438.json, .ditto/work-items/wi_260713bz4/events/000011.workspace-write.298bb2494dc6.json, .ditto/work-items/wi_260713bz4/events/000012.workspace-write.c5a1eb0cfb4b.json, .ditto/work-items/wi_260713bz4/events/000013.workspace-write.66898db0bd24.json, .ditto/work-items/wi_260713bz4/events/000014.workspace-write.b923edecb3ad.json, .ditto/work-items/wi_260713bz4/events/000015.workspace-write.b86d6bfe91ef.json, .ditto/work-items/wi_260713bz4/record.json, .ditto/work-items/wi_260713mw8/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713mw8/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713mw8/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_260713mw8/events/000003.workspace-write.c641f39f1ed0.json, .ditto/work-items/wi_260713mw8/events/000004.workspace-write.b36d769802f5.json, .ditto/work-items/wi_260713mw8/events/000005.workspace-write.f9f10d13322b.json, .ditto/work-items/wi_260713mw8/events/000006.workspace-write.f348d97ef9b0.json, .ditto/work-items/wi_260713mw8/events/000007.workspace-write.c11f2f2d222b.json, .ditto/work-items/wi_260713mw8/events/000008.workspace-write.ce4868f0b0f7.json, .ditto/work-items/wi_260713mw8/events/000009.workspace-write.032d8fb1cb90.json, .ditto/work-items/wi_260713mw8/events/000010.workspace-write.b13c71a2c042.json, .ditto/work-items/wi_260713mw8/events/000011.workspace-write.b54a563b601a.json, .ditto/work-items/wi_260713mw8/events/000012.workspace-write.d75a413c8a78.json, .ditto/work-items/wi_260713mw8/record.json, .ditto/work-items/wi_260713oms/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713oms/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713oms/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_260713oms/events/000003.workspace-write.c3f75136da66.json, .ditto/work-items/wi_260713oms/events/000004.workspace-write.1896b21f27d6.json, .ditto/work-items/wi_260713oms/events/000005.workspace-write.90d8b057148b.json, .ditto/work-items/wi_260713oms/events/000006.workspace-write.b198cb91359e.json, .ditto/work-items/wi_260713oms/events/000007.workspace-write.40e15e1f95e8.json, .ditto/work-items/wi_260713oms/events/000008.workspace-write.449fed3f671d.json, .ditto/work-items/wi_260713oms/events/000009.workspace-write.878c1bca858a.json, .ditto/work-items/wi_260713oms/events/000010.workspace-write.c3b7075029f7.json, .ditto/work-items/wi_260713oms/events/000011.workspace-write.84d25c3498fe.json, .ditto/work-items/wi_260713oms/events/000012.workspace-write.d75a413c8a78.json, .ditto/work-items/wi_260713oms/record.json, .ditto/work-items/wi_260713sgq/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713sgq/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713sgq/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_260713sgq/events/000003.workspace-write.bed7b95c4575.json, .ditto/work-items/wi_260713sgq/events/000004.workspace-write.a2521167c576.json, .ditto/work-items/wi_260713sgq/events/000005.workspace-write.3b402dd40c85.json, .ditto/work-items/wi_260713sgq/events/000006.workspace-write.81f47d841954.json, .ditto/work-items/wi_260713sgq/events/000007.workspace-write.efcaedbda42b.json, .ditto/work-items/wi_260713sgq/events/000008.workspace-write.0ef788e81635.json, .ditto/work-items/wi_260713sgq/events/000009.workspace-write.bd422660cb49.json, .ditto/work-items/wi_260713sgq/events/000010.workspace-write.fd0367c511ce.json, .ditto/work-items/wi_260713sgq/record.json, .ditto/work-items/wi_260713sxs/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713sxs/events/000001.workspace-write.de6de095088e.json, .ditto/work-items/wi_260713sxs/events/000002.workspace-write.58901ba7176e.json, .ditto/work-items/wi_260713sxs/events/000003.workspace-write.911feaad4717.json, .ditto/work-items/wi_260713sxs/events/000004.workspace-write.ce913c143bdb.json, .ditto/work-items/wi_260713sxs/events/000005.workspace-write.a2728ffb5bdc.json, .ditto/work-items/wi_260713sxs/record.json, .ditto/work-items/wi_260713zlo/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713zlo/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713zlo/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_260713zlo/events/000003.workspace-write.5273e277d718.json, .ditto/work-items/wi_260713zlo/events/000004.workspace-write.e68aaa878f25.json, .ditto/work-items/wi_260713zlo/events/000005.workspace-write.d87c819ab8b0.json, .ditto/work-items/wi_260713zlo/events/000006.workspace-write.9ec6ab577dd9.json, .ditto/work-items/wi_260713zlo/events/000007.workspace-write.f69afd4432ee.json, .ditto/work-items/wi_260713zlo/events/000008.workspace-write.7a84e6874cdf.json, .ditto/work-items/wi_260713zlo/events/000009.workspace-write.ed85366edd4e.json, .ditto/work-items/wi_260713zlo/record.json, .ditto/work-items/wi_2607149tx/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_2607149tx/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_2607149tx/events/000002.workspace-write.8660dc8c8788.json, .ditto/work-items/wi_2607149tx/events/000003.workspace-write.95c371d9d3f4.json, .ditto/work-items/wi_2607149tx/events/000004.workspace-write.a44e188f5efc.json, .ditto/work-items/wi_2607149tx/events/000005.workspace-write.a934f720505c.json, .ditto/work-items/wi_2607149tx/events/000006.workspace-write.de05ad34bbb2.json, .ditto/work-items/wi_2607149tx/events/000007.workspace-write.e5a71c11309a.json, .ditto/work-items/wi_2607149tx/events/000008.workspace-write.b1a465784cdd.json, .ditto/work-items/wi_2607149tx/record.json, .ditto/work-items/wi_260714ns9/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260714ns9/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260714ns9/events/000002.workspace-write.a71d444039db.json, .ditto/work-items/wi_260714ns9/events/000003.workspace-write.42b0e0e958d2.json, .ditto/work-items/wi_260714ns9/events/000004.workspace-write.080885aefb01.json, .ditto/work-items/wi_260714ns9/events/000005.workspace-write.edc7274510cd.json, .ditto/work-items/wi_260714ns9/events/000006.workspace-write.4d714dd0d3cb.json, .ditto/work-items/wi_260714ns9/events/000007.workspace-write.54fce70f11d2.json, .ditto/work-items/wi_260714ns9/events/000008.workspace-write.020da188eeb1.json, .ditto/work-items/wi_260714ns9/events/000009.workspace-write.4af62b081558.json, .ditto/work-items/wi_260714ns9/events/000010.workspace-write.2041bafe0508.json, .ditto/work-items/wi_260714ns9/events/000011.workspace-write.a4777ea99353.json, .ditto/work-items/wi_260714ns9/events/000012.workspace-write.c5165176300b.json, .ditto/work-items/wi_260714ns9/record.json. These are likely files an owner changed but did NOT report in its record-result changed_files (change_surface under-declaration), or genuinely unrelated concurrent work. Next: check the owners' reported changed_files against `git status`, then either expand the work item's changed_files to include the real run output, or stash the unrelated work — then re-run `ditto autopilot complete`. (Run byproducts under .ditto/memory are auto-absorbed; these paths are not.)"
+    ]
+  },
+  "runs": [],
+  "handoff_path": ".ditto/local/handoff/wi_260714ns9.md",
+  "started_at_sha": "922ccc882bd9a73bc0efaed87388e550c7ac1176",
+  "started_untracked_baseline": [
+    ".ditto/knowledge/adr/ADR-20260714-code-quality-relate-curate-specialization.md",
+    ".ditto/memory/events/memevt_retro_21405257835921a5.json",
+    ".ditto/memory/events/memevt_retro_3a25c63a199ad689.json",
+    ".ditto/memory/events/memevt_retro_3a4ad9679866be63.json",
+    ".ditto/memory/events/memevt_retro_76c02f447e6af820.json",
+    ".ditto/work-items/wi_2607132g5/",
+    ".ditto/work-items/wi_2607133h2/",
+    ".ditto/work-items/wi_2607134ma/",
+    ".ditto/work-items/wi_260713bz4/",
+    ".ditto/work-items/wi_260713mw8/",
+    ".ditto/work-items/wi_260713oms/",
+    ".ditto/work-items/wi_260713sgq/",
+    ".ditto/work-items/wi_260713sxs/",
+    ".ditto/work-items/wi_260713zlo/",
+    ".ditto/work-items/wi_2607149tx/",
+    ".ditto/work-items/wi_260714ns9/"
+  ],
+  "created_at": "2026-07-14T02:18:34.592Z",
+  "updated_at": "2026-07-14T05:47:17.237Z",
+  "closed_at": "2026-07-14T05:47:17.236Z"
+}

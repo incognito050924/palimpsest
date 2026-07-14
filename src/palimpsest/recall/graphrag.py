@@ -1468,3 +1468,370 @@ def recall_runtime_test_impact(driver, method_id, limit=25):
             f"no runtime COVERS caller for '{method_id}' — see the overlay disclosure above"
         )
     return _result(items, gaps, None, [])
+
+
+# ── edge-precision: the resolution='name' recall channel ──────────────────────
+# "Which Java references did the extractor resolve by NAME (not by type)?" A
+# dedicated, global read-only entry point that CONSUMES the per-edge
+# ``resolution`` marker (Edge.resolution, projected onto CALLS / DEPENDS_ON in
+# kg/ingest.py) and surfaces the name-resolved edges as its own grounded channel.
+# Detect-only: it re-uses the existing marker, never re-derives precision. Mirrors
+# the sibling MODIFIES channels (recall_churn / recall_cochange): SEPARATE global
+# entry point, standard result shape, uncapped (no fan-out cap — a whole-graph
+# scan bounded only by ``limit``, exactly like recall_churn).
+
+# CALLS / DEPENDS_ON edges the extractor stamped ``resolution='name'`` whose SOURCE
+# endpoint lives in a ``.java`` file. Only SCALAR projections (``AS`` columns) are
+# returned — never a whole node — so the per-node author (stamped on every Method /
+# Class) cannot leak. ``$lim`` is the sole parameter (server-side LIMIT after a total
+# ORDER BY, rebuild-deterministic); ``.java`` / ``name`` are DEV literals baked into
+# the query text (trusted constants, not caller input), so no untrusted value is ever
+# interpolated. ``type(r)`` distinguishes CALLS from DEPENDS_ON per row.
+_EDGE_PRECISION = """
+MATCH (a)-[r:CALLS|DEPENDS_ON]->(b)
+WHERE r.resolution = 'name' AND a.path ENDS WITH '.java'
+RETURN a.id AS id, labels(a) AS labels, a.name AS name,
+       a.qualified_name AS qualified_name,
+       a.path AS path, a.start_line AS start_line, a.end_line AS end_line,
+       a.source_commit AS source_commit, a.committed_at AS committed_at,
+       type(r) AS relation_type, r.resolution AS resolution, b.id AS dst
+ORDER BY id, relation_type, dst
+LIMIT $lim
+"""
+
+# Standing gap (ac-2 honesty), ALWAYS emitted: name-resolution is a LOW-PRECISION
+# marker, NOT a defect verdict, and the two relation kinds mean different things. A
+# Java DEPENDS_ON is STRUCTURALLY always resolution='name' (the extractor never
+# type-resolves import targets — see extract/java.py), so those flags are the norm,
+# not a finding; a CALLS resolution='name' is a MEANINGFUL name-fallback (the callee
+# could not be bound to a typed Method). Completeness is NOT claimed — only edges the
+# extractor stamped are flagged, not every imprecise reference.
+_EDGE_PRECISION_GAP = (
+    "resolution='name' is a LOW-PRECISION marker, not a quality verdict: a Java "
+    "DEPENDS_ON is STRUCTURALLY always resolution='name' (import targets are never "
+    "type-resolved), so those flags are the norm; a CALLS resolution='name' is a "
+    "meaningful name-fallback (the callee could not be bound to a typed Method). "
+    "Completeness is NOT claimed — only edges the extractor stamped are flagged"
+)
+
+
+def _edge_precision_reingest_gap() -> str:
+    """The DISTINCT empty-result advisory: an exact ``resolution='name'`` match is
+    empty BOTH when the graph is genuinely clean AND when it PREDATES the per-edge
+    resolution marker (its CALLS / DEPENDS_ON edges carry no resolution property at
+    all). Emitting this on empty stops a predate-empty from reading as a false
+    all-clear — mirrors :func:`_test_impact_reingest_gap`."""
+    return (
+        "no resolution='name' edge found on any .java endpoint; if unexpected, the "
+        "graph may PREDATE the per-edge resolution marker (its CALLS / DEPENDS_ON "
+        "edges carry no resolution property, so an exact resolution='name' match is "
+        "empty) — re-ingest to populate resolution before reading this as 'no "
+        "low-precision edges'"
+    )
+
+
+def recall_edge_precision(driver, limit=25):
+    """Recall the name-resolved (low-precision) Java edges — the ``resolution='name'``
+    channel.
+
+    A SEPARATE, global read-only entry point that CONSUMES the per-edge
+    ``resolution`` marker (never re-derives it). MATCHes CALLS / DEPENDS_ON edges
+    stamped ``resolution='name'`` whose source endpoint is a ``.java`` node,
+    id-ordered before a server-side ``LIMIT $lim`` (rebuild-deterministic) with
+    ``$lim`` the sole parameter — ``.java`` / ``name`` are dev literals, never
+    interpolated caller input. Each item is the grounded SOURCE endpoint (commit +
+    file:line via :func:`_sources`, author-omitted — never a whole-node projection)
+    carrying its ``relation`` kind (CALLS vs DEPENDS_ON, so the structurally-always-low
+    DEPENDS_ON is distinguishable from a meaningful CALLS name-fallback) and its
+    ``resolution``. NO content-verdict field — this is a grounded observation, not a
+    quality judgment; ``confidence`` is the deterministic grounding-coverage share
+    (:func:`_confidence`). Combinatorial only (one scan + dict building), no LLM.
+
+    Gaps (ac-2 / ac-3 honesty): the low-precision note is ALWAYS present (completeness
+    never claimed, DEPENDS_ON-vs-CALLS distinguished); on an EMPTY result a DISTINCT
+    re-ingest advisory is added so a graph predating the resolution marker is not
+    mistaken for a clean 'no low-precision edges'.
+    """
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_EDGE_PRECISION, lim=limit)]
+    items = []
+    for rec in rows:
+        it = _item(rec, rec["relation_type"], 1)
+        it["resolution"] = rec["resolution"]
+        it["dst"] = rec["dst"]
+        items.append(it)
+    gaps = [_EDGE_PRECISION_GAP]
+    if not items:
+        gaps.append(_edge_precision_reingest_gap())
+    return _result(items, gaps, None, [])
+
+
+# ── callgraph-locality: the cross-package CALLS recall channel ────────────────
+# "Of a Java Method's outgoing typed CALLS, what share leave its own Package?" A
+# dedicated, global read-only entry point (facet-2) that COMPOSES with the facet-1
+# ``resolution`` marker: locality is computed over TYPED calls only, and the
+# name-collision noise (resolution='name' CALLS fan out to every same-simple-name
+# method corpus-wide) is carried in a SEPARATE count, never in the cross numerator.
+# BOUNDARY = Package (NOT Community — Community membership is a deterministic
+# structural partition that is definitionally vacuous for this cross-boundary
+# question; anchoring here on the real Package spine is what avoids the constant-zero
+# degenerate). Detect-only: it re-uses the CONTAINS spine + the resolution marker,
+# never re-derives either. Mirrors recall_edge_precision / recall_churn: SEPARATE
+# global entry point, standard result shape, uncapped (whole-graph scan bounded only
+# by ``limit``).
+#
+# Per Java caller Method the query aggregates its outgoing CALLS into the TRIPLE
+# (cross / same / unresolved) + a separate name_calls, one row per caller (id-ordered
+# before a server-side ``LIMIT $lim``, rebuild-deterministic; ``$lim`` the sole
+# parameter — ``.java`` / ``typed`` / ``name`` are DEV literals, never interpolated).
+# The Method->Package climb is a VARIABLE-LENGTH ``[:CONTAINS*]`` upward (Package ->
+# File -> Class -> ... -> Method): nested classes add Class->Class hops, so a fixed
+# path length would silently drop them. SCOPE is Java via ``caller.path ENDS WITH
+# '.java'`` (METHOD nodes carry no language tag, and Kotlin/others also emit Package
+# CONTAINS, so the path filter is the language boundary). BRANCH (ADR-20260703): no
+# explicit branch filter — exactly like recall_edge_precision — because node ids are
+# branch-scoped and CONTAINS / CALLS edges connect only same-branch nodes, so the
+# per-caller aggregation (keyed by the branch-scoped ``caller.id``) and its CONTAINS
+# climb stay within one branch plane; cross-branch nodes cannot be double-counted.
+# Only SCALAR projections are returned (never a whole node), so the per-node author
+# cannot leak. A callee with NO resolvable Package (``dp IS NULL``) is counted as its
+# own ``unresolved`` bucket — NEVER folded into ``same`` via a NULL comparison — and a
+# DEFAULT-PACKAGE caller (``cp IS NULL``, ``_package_fqn==''`` -> no Package node) is
+# flagged ``default_package`` with cross==same==0 (no computable locality), NEVER
+# collapsed as same-package. cross_ratio is guarded (0/0 -> 0.0, never NaN).
+_CALLGRAPH_LOCALITY = """
+MATCH (caller:Method)-[c:CALLS]->(callee)
+WHERE caller.path ENDS WITH '.java'
+OPTIONAL MATCH (cp:Package)-[:CONTAINS*]->(caller)
+OPTIONAL MATCH (dp:Package)-[:CONTAINS*]->(callee)
+WITH caller, cp,
+     c.resolution AS res,
+     dp.qualified_name AS callee_pkg
+WITH caller, cp,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NOT NULL
+                 AND callee_pkg <> cp.qualified_name THEN 1 END) AS cross,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NOT NULL
+                 AND callee_pkg = cp.qualified_name THEN 1 END) AS same,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NULL THEN 1 END) AS unresolved,
+     count(CASE WHEN res = 'name' THEN 1 END) AS name_calls
+RETURN caller.id AS id, labels(caller) AS labels, caller.name AS name,
+       caller.qualified_name AS qualified_name,
+       caller.path AS path, caller.start_line AS start_line, caller.end_line AS end_line,
+       caller.source_commit AS source_commit, caller.committed_at AS committed_at,
+       cross, same, unresolved, name_calls,
+       (cp IS NULL) AS default_package,
+       CASE WHEN (cross + same) > 0
+            THEN toFloat(cross) / (cross + same) ELSE 0.0 END AS cross_ratio
+ORDER BY id
+LIMIT $lim
+"""
+
+# Standing gap (ac-2 / ac-3 honesty), ALWAYS emitted: cross_ratio is a grounded
+# OBSERVATION over TYPED cross-package calls, not a quality verdict, and it is a
+# LOWER-completeness view by construction. (1) Methods with ZERO outgoing CALLS are
+# ABSENT from the result — absence is NOT high locality. (2) resolution='name'
+# name-collision calls are carried in name_calls, kept OUT of the cross numerator, so
+# name-fallback noise never inflates locality. (3) callees with no resolvable Package
+# are their own ``unresolved`` bucket, excluded from the cross/same denominator, never
+# counted as same-package. (4) DEFAULT-PACKAGE callers (no Package node) are flagged
+# default_package with no computable locality, never collapsed as same-package.
+# Completeness is NOT claimed.
+_CALLGRAPH_LOCALITY_GAP = (
+    "cross_ratio is a grounded observation over TYPED cross-package CALLS, not a "
+    "quality verdict: Methods with zero outgoing CALLS are ABSENT (absence is not "
+    "high locality); resolution='name' name-collision calls are carried in name_calls "
+    "and kept OUT of the cross numerator; callees with no resolvable Package are their "
+    "own unresolved bucket (excluded from the denominator, never same-package); a "
+    "default-package caller has no computable locality (default_package). Completeness "
+    "is NOT claimed"
+)
+
+
+def _callgraph_locality_reingest_gap() -> str:
+    """The DISTINCT empty-result advisory: an empty result is ambiguous — it can mean
+    a genuinely CALLS-free / non-Java graph OR a graph that PREDATES the CALLS +
+    per-edge resolution + Package CONTAINS spine this channel reads. Emitting this on
+    empty stops a predate-empty from reading as a false all-clear — mirrors
+    :func:`_edge_precision_reingest_gap`."""
+    return (
+        "no Java caller with outgoing typed CALLS found; if unexpected, the graph may "
+        "PREDATE the CALLS + per-edge resolution + Package CONTAINS spine this channel "
+        "reads (its edges carry no resolution property, or Package nodes were not "
+        "minted) — re-ingest before reading this as 'perfect locality'"
+    )
+
+
+def recall_callgraph_locality(driver, limit=25):
+    """Recall Java callers by cross-package CALLS locality — the facet-2 signal.
+
+    A SEPARATE, global read-only entry point that COMPOSES with the per-edge
+    ``resolution`` marker (facet-1): per Java caller Method it aggregates the outgoing
+    CALLS into the grounded TRIPLE — ``cross`` (typed calls to a DIFFERENT Package),
+    ``same`` (typed calls within the caller's Package), ``unresolved`` (typed calls
+    whose callee has no resolvable Package) — plus ``name_calls`` (resolution='name'
+    name-collision calls carried SEPARATELY, never in the cross numerator) and
+    ``cross_ratio`` = cross / (cross + same), guarded to 0.0 (never a 0/0 NaN). The
+    Method->Package boundary is a VARIABLE-LENGTH CONTAINS climb (nested classes add
+    hops). Scoped to Java by the ``.java`` caller path; id-ordered before a server-side
+    ``LIMIT $lim`` (``$lim`` the sole parameter, rebuild-deterministic). Each item is
+    the grounded CALLER (commit + file:line via :func:`_sources`, author-omitted —
+    scalar projections only, never a whole node). NO content-verdict field — a grounded
+    observation, not a quality judgment. Combinatorial only (one aggregation + dict
+    building), no LLM.
+
+    Gaps (ac-2 / ac-3 honesty): the standing gap is ALWAYS present (zero-CALLS absence,
+    name-collision split, unresolved bucket, default-package bucket — completeness never
+    claimed); on an EMPTY result a DISTINCT re-ingest advisory is added so a graph
+    predating the CALLS / resolution / CONTAINS spine is not mistaken for perfect
+    locality.
+    """
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_CALLGRAPH_LOCALITY, lim=limit)]
+    items = []
+    for rec in rows:
+        it = _item(rec, CALLS, 1)
+        it["cross"] = rec["cross"]
+        it["same"] = rec["same"]
+        it["unresolved"] = rec["unresolved"]
+        it["name_calls"] = rec["name_calls"]
+        it["default_package"] = rec["default_package"]
+        it["cross_ratio"] = rec["cross_ratio"]
+        items.append(it)
+    gaps = [_CALLGRAPH_LOCALITY_GAP]
+    if not items:
+        gaps.append(_callgraph_locality_reingest_gap())
+    return _result(items, gaps, None, [])
+
+
+# ── composite refactor-candidate identifier: facet-1 ∧ facet-2 ────────────────
+# The DETERMINISTIC, provider-free SELECTOR (facet-3 / wi_260714ns9 M1+M3) that
+# COMPOSES the two Relate signals in ONE id-ordered query: per Java caller Method it
+# aggregates BOTH the name-resolution axis (name_resolved CALLS — LOW PRECISION) AND
+# the locality axis (cross-package typed CALLS — LOW LOCALITY), then keeps ONLY the
+# Methods carrying BOTH (``cross > 0 AND name_calls > 0``). This is the SINGLE source
+# of the composite predicate (M2: curate re-implements NONE of it) and a SINGLE
+# id-ordered query — NEVER an intersection of two independently-capped recalls, whose
+# re-run target set would be non-deterministic (M3).
+#
+# Each surviving Method is emitted as an EXTRACTION TARGET tuple for the host-injected
+# LLM producer: ``id`` (target), ``grounding_ids`` (the target plus the callee ids its
+# composite calls reach — the CLOSED citation set), and a NEUTRAL ``facts`` triple
+# (raw cross/same/unresolved/name_calls counts, NO adjectives). The LLM SELECTS
+# NOTHING — the selection IS this deterministic query (F-Q6); the model only
+# synthesises a grounded co-occurrence OBSERVATION over the pre-selected tuple.
+#
+# Reuses the facet-2 aggregation shape verbatim (the ``[:CONTAINS*]`` variable-length
+# Method->Package climb, the resolution marker, the ``.java`` language boundary,
+# branch-scoped ids). Combinatorial only, no LLM. Scalar projections only (never a
+# whole node), so the per-node author cannot leak. ``$lim`` is the SOLE parameter;
+# ``.java`` / ``typed`` / ``name`` are DEV literals, never interpolated.
+_REFACTOR_CANDIDATES = """
+MATCH (caller:Method)-[c:CALLS]->(callee)
+WHERE caller.path ENDS WITH '.java'
+OPTIONAL MATCH (cp:Package)-[:CONTAINS*]->(caller)
+OPTIONAL MATCH (dp:Package)-[:CONTAINS*]->(callee)
+WITH caller, cp, c.resolution AS res, callee,
+     dp.qualified_name AS callee_pkg
+WITH caller, cp,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NOT NULL
+                 AND callee_pkg <> cp.qualified_name THEN 1 END) AS cross,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NOT NULL
+                 AND callee_pkg = cp.qualified_name THEN 1 END) AS same,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NULL THEN 1 END) AS unresolved,
+     count(CASE WHEN res = 'name' THEN 1 END) AS name_calls,
+     collect(DISTINCT CASE
+         WHEN res = 'name'
+              OR (res = 'typed' AND callee_pkg IS NOT NULL
+                  AND callee_pkg <> cp.qualified_name)
+         THEN callee.id END) AS raw_grounding
+WITH caller, cross, same, unresolved, name_calls,
+     [x IN raw_grounding WHERE x IS NOT NULL] AS grounding
+WHERE cross > 0 AND name_calls > 0
+RETURN caller.id AS id, labels(caller) AS labels, caller.name AS name,
+       caller.qualified_name AS qualified_name,
+       caller.path AS path, caller.start_line AS start_line, caller.end_line AS end_line,
+       caller.source_commit AS source_commit, caller.committed_at AS committed_at,
+       cross, same, unresolved, name_calls, grounding
+ORDER BY id
+LIMIT $lim
+"""
+
+# Standing gap (ac-2 honesty), ALWAYS emitted: a candidate is the CO-OCCURRENCE of two
+# structural facts (a name_resolved CALL AND a cross-package CALL on one Method), NOT a
+# refactor verdict — it is a target for grounded external SYNTHESIS, not a judgment. The
+# facts triple carries raw counts only; any interpretation is the reader's. Completeness
+# is NOT claimed (Methods missing either axis are absent — absence is not a clean bill).
+_REFACTOR_CANDIDATES_GAP = (
+    "a candidate is the grounded CO-OCCURRENCE of two structural facts — a "
+    "name-resolved (low-precision) CALL AND a cross-package (low-locality) CALL on one "
+    "Method — surfaced as a target for external grounded synthesis, NOT a refactor "
+    "verdict or quality judgment; the facts triple is raw counts only. Methods carrying "
+    "just one axis are absent (absence is not a clean bill). Completeness is NOT claimed"
+)
+
+
+def _refactor_candidates_absent_gap() -> str:
+    """The DISTINCT empty-result advisory: an empty composite is AMBIGUOUS — it can mean
+    the two axes genuinely never co-occur on one Method on a resolved corpus (the
+    documented current state — per-edge precision leaves few/no name-resolved CALLS) OR
+    a graph that PREDATES the CALLS + resolution + Package CONTAINS spine this reads.
+    Emitting this on empty stops an empty from reading as a false 'no such coupling' —
+    mirrors :func:`_callgraph_locality_reingest_gap`."""
+    return (
+        "no Method carries BOTH a name-resolved CALL and a cross-package CALL; this "
+        "empty is ambiguous — on a PRECISION-RESOLVED corpus name-resolved CALLS are "
+        "few or absent so the two axes rarely co-occur (the marker for this composite "
+        "may be structurally ABSENT), OR the graph PREDATES the CALLS + resolution + "
+        "Package CONTAINS spine — re-ingest before reading this as 'no such coupling'"
+    )
+
+
+def _candidate_facts(rec) -> str:
+    """The NEUTRAL facts triple for the producer: raw counts + resolution marker, NO
+    adjectives (F-Q6 framing — the model synthesises an observation, it is not handed a
+    verdict). Deterministic string of the aggregated counts."""
+    return (
+        f"typed_cross_package_calls={rec['cross']}; "
+        f"typed_same_package_calls={rec['same']}; "
+        f"typed_unresolved_calls={rec['unresolved']}; "
+        f"name_resolved_calls={rec['name_calls']}"
+    )
+
+
+def recall_refactor_candidates(driver, limit=25):
+    """Identify composite refactor CANDIDATES — Java Methods carrying BOTH the
+    low-precision (name_resolved CALLS) AND low-locality (cross-package CALLS) axes —
+    and emit each as a grounded EXTRACTION TARGET for the host-injected LLM producer
+    (facet-3 / wi_260714ns9 M1+M3).
+
+    A SEPARATE, global read-only entry point that COMPOSES the two Relate signals in a
+    SINGLE deterministic, provider-free, id-ordered query (never an intersection of two
+    capped recalls). Per surviving Method it returns the standard result shape whose
+    items each additionally carry ``grounding_ids`` (the target plus the callee ids its
+    composite calls reach — the closed citation set the producer grounds in) and a
+    NEUTRAL ``facts`` triple (raw cross/same/unresolved/name_calls counts, no
+    adjectives). The LLM SELECTS nothing — the selection IS this query (F-Q6). Each item
+    is the grounded CALLER (commit + file:line via :func:`_sources`, author-omitted —
+    scalar projections only). NO content-verdict field. Combinatorial only, no LLM.
+
+    Gaps (ac-2 honesty): the standing gap is ALWAYS present (co-occurrence-not-verdict,
+    completeness never claimed); on an EMPTY result a DISTINCT absent/predate advisory is
+    added so an empty composite is not mistaken for 'no such coupling' — on a
+    precision-resolved corpus the composite is legitimately empty (documented vacuity),
+    which is distinct from a graph predating the spine."""
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_REFACTOR_CANDIDATES, lim=limit)]
+    items = []
+    for rec in rows:
+        it = _item(rec, CALLS, 1)
+        it["grounding_ids"] = (rec["id"], *rec["grounding"])
+        it["facts"] = _candidate_facts(rec)
+        it["cross"] = rec["cross"]
+        it["same"] = rec["same"]
+        it["unresolved"] = rec["unresolved"]
+        it["name_calls"] = rec["name_calls"]
+        items.append(it)
+    gaps = [_REFACTOR_CANDIDATES_GAP]
+    if not items:
+        gaps.append(_refactor_candidates_absent_gap())
+    return _result(items, gaps, None, [])

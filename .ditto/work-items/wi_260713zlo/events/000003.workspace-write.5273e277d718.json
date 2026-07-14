@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713zlo",
+  "seq": 3,
+  "actor": "workspace-write",
+  "event_id": "5273e277d718305a38e441831fbf9fea894143d20f5a7def6e5e7f8e94492b75",
+  "ts": "2026-07-13T08:11:35.175Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-1",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "pytest tests/e2e/test_reconcile_e2e.py --collect-only -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

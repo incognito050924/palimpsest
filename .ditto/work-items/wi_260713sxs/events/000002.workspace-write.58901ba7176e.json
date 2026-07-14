@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713sxs",
+  "seq": 2,
+  "actor": "workspace-write",
+  "event_id": "58901ba7176edcb47a434ca693e6d53c38c6e21bfe9d64376fd0d4dd1aa1af64",
+  "ts": "2026-07-13T09:17:41.929Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-2",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "grep -q ## 7. 관계 — 주제 F(#1)와의 소유권 경계 docs/design-notes.md",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

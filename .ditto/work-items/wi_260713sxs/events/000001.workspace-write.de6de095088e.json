@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713sxs",
+  "seq": 1,
+  "actor": "workspace-write",
+  "event_id": "de6de095088ed6724b396c16cf64eb3bb03c0f67ddf8d714d7f936a8686a2b95",
+  "ts": "2026-07-13T09:17:41.855Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-1",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "grep -q coverage/응집 facet의 SoT는 주제 B(#6)가 소유 docs/design-notes.md",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713bz4",
+  "seq": 7,
+  "actor": "workspace-write",
+  "event_id": "a47034530f938c7fffc425d782a56aee13a354f069a0993f596bfeaa80c48e70",
+  "ts": "2026-07-13T21:26:44.711Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-2",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "file",
+        "path": ".ditto/local/runs/wi_260713bz4/coverage.json",
+        "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/extract/ -q",
+        "summary": "156 passed, exit 0 (full pure-unit extract suite, no regressions)"
+      },
+      {
+        "kind": "command",
+        "command": "git stash push -- src/palimpsest/extract/java.py; pytest tests/extract/test_java_edge_resolution.py -q; git stash pop; pytest tests/extract/test_java_edge_resolution.py -q",
+        "summary": "TDD: 6 failed on AC assertions (red) -> 6 passed (green)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/extract/test_java_edge_resolution.py -q",
+        "summary": "6 passed incl test_ac2_type_resolved_call_is_typed_and_chain_receiver_is_name, test_constraintA_typed_upgrades_name_regardless_of_source_order, test_constraintB_unnarrowed_collision_calls_marked_name, test_constraintB_narrowing_import_keeps_typed"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/extract/ -q",
+        "summary": "156 passed, exit 0 (fresh run)"
+      },
+      {
+        "kind": "file",
+        "path": "src/palimpsest/extract/java.py",
+        "summary": "_precise 616-626 + _calls_edges seed 641-665 (unnarrowed seed marked typed) vs _depends_on_edges 515-526 (seed narrowed) — the ac-2 gap"
+      },
+      {
+        "kind": "file",
+        "path": "src/palimpsest/extract/java.py",
+        "lines": {
+          "start": 641,
+          "end": 665
+        },
+        "summary": "seed = all same-name classes, whole set marked typed under narrowing import"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/extract/test_java_edge_resolution.py -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

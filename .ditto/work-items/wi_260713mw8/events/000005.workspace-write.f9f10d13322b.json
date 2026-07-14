@@ -1,0 +1,30 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713mw8",
+  "seq": 5,
+  "actor": "workspace-write",
+  "event_id": "f9f10d13322b7726d758497eccd3b8ba654a9b8b729eb514a9eadce3456be463",
+  "ts": "2026-07-13T04:18:00.331Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-3",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "file",
+        "path": ".ditto/local/runs/wi_260713mw8/coverage.json",
+        "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/extract/test_extract_python.py -q",
+        "summary": "10 passed exit=0 (RED 스텁시 9 failed). ac-1 module_function/class_method/nested_not_emitted; ac-2 calls_name_based; ac-3 imports_honest_external; ac-4 decorator_in_corpus_lands_external_drops; ac-5 module_assignment_variable_deduped; coverage iterator_prunes_ignored_dirs"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/extract/ -q",
+        "summary": "회귀 30 passed exit=0 (기존20 불변+신규10). driver fresh 재확인 동일"
+      }
+    ]
+  }
+}

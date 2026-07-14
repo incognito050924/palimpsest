@@ -1,0 +1,214 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_260713mw8",
+  "title": "다언어 온톨로지 — Python extractor 추가 [seed]",
+  "source_request": "다언어 온톨로지 — Python extractor 추가 [seed]\n\n> **설계 스레드 [seed]** · 우선순위 4번째 (kotlin > java > ts/js > **python** > golang > rust). #5에서 분리.\n> **SoT**: \\`docs/design-notes.md\\` 주제 **[A]**.\n\n## 요지\n\n온톨로지 하부(\\`FUNCTION\\` 노드 + community \\`_unit_of\\` de-Class화)는 #5 Kotlin 슬라이스(commit 138db70)에서 실현됐다. 이 언어는 **extractor 추가**(\\`extract/python.py\\` + \\`queries/python/*.scm\\`, tree-sitter-python)가 주 작업.\n\n## 언어별 특수사항 (design-notes [A] §2·§3)\n\n- **동적 타입 → DEPENDS_ON 희박** (P1): 덕 타이핑이라 타입 참조 기반 파생이 빈약 → IMPORTS·CALLS 중심 (A-Q4).\n- **이름 기반 CALLS 부정확** (P2): 일급 함수·동적 디스패치·몽키패치.\n- top-level 함수·모듈 변수가 흔해 de-Class화 효과 큼. 데코레이터·모듈 상수 표현은 A-Q3(VARIABLE 1급) 재검토 트리거가 될 수 있음.\n- **dogfood 이점**: palimpsest 자체가 Python이라 자기 코드로 즉시 검증 가능.\n\n## 다음 단계\n\n착수 시 A-Q4(DEPENDS_ON 약화)·A-Q3(모듈 변수 필요성)를 design-notes에서 정련 → 슬라이스 승격.",
+  "goal": "Python 소스를 palimpsest 온톨로지로 추출하는 extractor를 추가한다 — Kotlin 패리티(FUNCTION/METHOD + CONTAINS + CALLS) 위에 IMPORTS 엣지, 데코레이터 적용 엣지, 순수 모듈 데이터 VARIABLE 노드를 얹되 community 결정론과 Java/Kotlin 회귀는 불변으로 유지한다.",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "모듈직속 def는 FUNCTION, class body def는 METHOD로 추출되고 File이 CONTAINS하며, nested/local def 처리 규칙이 테스트로 고정된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713mw8/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_extract_python.py -q",
+          "summary": "10 passed exit=0 (RED 스텁시 9 failed). ac-1 module_function/class_method/nested_not_emitted; ac-2 calls_name_based; ac-3 imports_honest_external; ac-4 decorator_in_corpus_lands_external_drops; ac-5 module_assignment_variable_deduped; coverage iterator_prunes_ignored_dirs"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "회귀 30 passed exit=0 (기존20 불변+신규10). driver fresh 재확인 동일"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "CALLS가 name-based로 왕복 적재되고 Function·Method 둘 다 source가 될 수 있다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713mw8/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_extract_python.py -q",
+          "summary": "10 passed exit=0 (RED 스텁시 9 failed). ac-1 module_function/class_method/nested_not_emitted; ac-2 calls_name_based; ac-3 imports_honest_external; ac-4 decorator_in_corpus_lands_external_drops; ac-5 module_assignment_variable_deduped; coverage iterator_prunes_ignored_dirs"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "회귀 30 passed exit=0 (기존20 불변+신규10). driver fresh 재확인 동일"
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "IMPORTS 엣지가 File→참조 모듈로 emit되며 외부 미해결 참조는 honest external로 남는다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713mw8/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_extract_python.py -q",
+          "summary": "10 passed exit=0 (RED 스텁시 9 failed). ac-1 module_function/class_method/nested_not_emitted; ac-2 calls_name_based; ac-3 imports_honest_external; ac-4 decorator_in_corpus_lands_external_drops; ac-5 module_assignment_variable_deduped; coverage iterator_prunes_ignored_dirs"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "회귀 30 passed exit=0 (기존20 불변+신규10). driver fresh 재확인 동일"
+        }
+      ]
+    },
+    {
+      "id": "ac-4",
+      "statement": "데코레이터 적용 관계가 엣지로 포착된다 (decorated callable→decorator)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713mw8/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_extract_python.py -q",
+          "summary": "10 passed exit=0 (RED 스텁시 9 failed). ac-1 module_function/class_method/nested_not_emitted; ac-2 calls_name_based; ac-3 imports_honest_external; ac-4 decorator_in_corpus_lands_external_drops; ac-5 module_assignment_variable_deduped; coverage iterator_prunes_ignored_dirs"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "회귀 30 passed exit=0 (기존20 불변+신규10). driver fresh 재확인 동일"
+        }
+      ]
+    },
+    {
+      "id": "ac-5",
+      "statement": "순수 모듈 상수·전역이 VARIABLE 노드로 적재되고 CONTAINS(File→Variable)로 연결되며, 데코레이터·함수는 VARIABLE로 잡히지 않는다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713mw8/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_extract_python.py -q",
+          "summary": "10 passed exit=0 (RED 스텁시 9 failed). ac-1 module_function/class_method/nested_not_emitted; ac-2 calls_name_based; ac-3 imports_honest_external; ac-4 decorator_in_corpus_lands_external_drops; ac-5 module_assignment_variable_deduped; coverage iterator_prunes_ignored_dirs"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "회귀 30 passed exit=0 (기존20 불변+신규10). driver fresh 재확인 동일"
+        }
+      ]
+    },
+    {
+      "id": "ac-6",
+      "statement": "community 결정론 분할과 rebuild-determinism이 유지되어 기존 Java/Kotlin community·ingest 테스트가 전부 green이다 (회귀 불변, ADR-20260702-community-deterministic-structural)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713mw8/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest -q",
+          "summary": "226 passed, 0 fail/error/skip, exit 0, 50.5s (testcontainers Neo4j live 포함)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/kg/test_community.py tests/kg/test_ingest.py -q",
+          "summary": "14 passed exit 0 — Java/Kotlin community 클러스터링·FUNCTION 왕복·재적재 멱등·partition 불변식"
+        },
+        {
+          "kind": "command",
+          "command": "git diff --stat HEAD; grep -c VARIABLE src/palimpsest/kg/community.py",
+          "summary": "community.py 변경목록에 없음; VARIABLE grep=0 (union-find inert)"
+        }
+      ]
+    },
+    {
+      "id": "ac-7",
+      "statement": "전체 테스트 스위트가 green이다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713mw8/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest -q",
+          "summary": "226 passed, 0 fail/error/skip, exit 0, 50.5s (testcontainers Neo4j live 포함)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/kg/test_community.py tests/kg/test_ingest.py -q",
+          "summary": "14 passed exit 0 — Java/Kotlin community 클러스터링·FUNCTION 왕복·재적재 멱등·partition 불변식"
+        },
+        {
+          "kind": "command",
+          "command": "git diff --stat HEAD; grep -c VARIABLE src/palimpsest/kg/community.py",
+          "summary": "community.py 변경목록에 없음; VARIABLE grep=0 (union-find inert)"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [
+    "src/palimpsest/ir.py",
+    "src/palimpsest/kg/ingest.py",
+    "pyproject.toml",
+    "src/palimpsest/extract/python.py",
+    "src/palimpsest/extract/__init__.py",
+    "src/palimpsest/extract/queries/python/tags.scm",
+    "tests/extract/test_extract_python.py"
+  ],
+  "worktrees": [],
+  "declared_risk": {
+    "non_local": true
+  },
+  "github_issue": {
+    "repo": "incognito050924/palimpsest",
+    "number": 10
+  },
+  "risks": [],
+  "re_entry": {
+    "command": "# resolve the land blocker, then re-run: ditto autopilot complete --workItem wi_260713mw8",
+    "fresh_evidence_needed": [
+      "land aborted — 12 working-tree path(s) outside the declared change_surface: .: .ditto/work-items/wi_260713mw8/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713mw8/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713mw8/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_260713mw8/events/000003.workspace-write.c641f39f1ed0.json, .ditto/work-items/wi_260713mw8/events/000004.workspace-write.b36d769802f5.json, .ditto/work-items/wi_260713mw8/events/000005.workspace-write.f9f10d13322b.json, .ditto/work-items/wi_260713mw8/events/000006.workspace-write.f348d97ef9b0.json, .ditto/work-items/wi_260713mw8/events/000007.workspace-write.c11f2f2d222b.json, .ditto/work-items/wi_260713mw8/events/000008.workspace-write.ce4868f0b0f7.json, .ditto/work-items/wi_260713mw8/events/000009.workspace-write.032d8fb1cb90.json, .ditto/work-items/wi_260713mw8/record.json, recipe.yaml. These are likely files an owner changed but did NOT report in its record-result changed_files (change_surface under-declaration), or genuinely unrelated concurrent work. Next: check the owners' reported changed_files against `git status`, then either expand the work item's changed_files to include the real run output, or stash the unrelated work — then re-run `ditto autopilot complete`. (Run byproducts under .ditto/memory are auto-absorbed; these paths are not.)"
+    ]
+  },
+  "runs": [],
+  "started_at_sha": "138db7071bfeb26693229451659e9b7ead3303f5",
+  "started_untracked_baseline": [
+    ".ditto/work-items/wi_260713mw8/"
+  ],
+  "created_at": "2026-07-13T01:27:59.737Z",
+  "updated_at": "2026-07-13T04:24:05.223Z",
+  "closed_at": "2026-07-13T04:24:05.222Z"
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713sgq",
+  "seq": 6,
+  "actor": "workspace-write",
+  "event_id": "81f47d841954069423d1e0a75a3cf6eeb5acda832987f7ecbdf09e5861f453ee",
+  "ts": "2026-07-13T07:15:38.834Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-4",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "python -m pytest tests/extract/test_dispatch.py::test_dispatch_pure_java_identical_to_extract_java -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}
