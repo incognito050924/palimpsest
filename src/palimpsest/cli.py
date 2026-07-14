@@ -56,6 +56,7 @@ from palimpsest.recall import (
     recall_cochange,
     recall_test_impact,
     recall_edge_precision,
+    recall_callgraph_locality,
 )
 from palimpsest.recall.graphrag import reconcile_recall
 from palimpsest.reconcile import capture
@@ -137,6 +138,14 @@ def _cmd_edge_precision(args) -> None:
     # The shared channel printer: ``resolution`` is the per-item field it prints,
     # so each low-precision edge shows ``[resolution=name]`` beside its grounding.
     _print_channel("EDGE-PRECISION", "resolution", result, args.limit)
+
+
+def _cmd_call_locality(args) -> None:
+    with _driver() as driver:
+        result = recall_callgraph_locality(driver, limit=args.limit)
+    # ``cross_ratio`` is the per-item scalar the shared printer shows — always a real
+    # float (0/0 guarded to 0.0), so it never prints ``[cross_ratio=None]``.
+    _print_channel("CALL-LOCALITY", "cross_ratio", result, args.limit)
 
 
 def _cmd_query(args) -> None:
@@ -505,6 +514,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ep.add_argument("--limit", type=int, default=25, help="max flagged edges (default 25)")
     p_ep.set_defaults(func=_cmd_edge_precision)
+
+    p_cl = sub.add_parser(
+        "call-locality",
+        help="Java callers by cross-package CALLS locality (typed cross/same/unresolved triple)",
+    )
+    p_cl.add_argument("--limit", type=int, default=25, help="max flagged callers (default 25)")
+    p_cl.set_defaults(func=_cmd_call_locality)
     return parser
 
 

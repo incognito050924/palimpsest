@@ -1364,3 +1364,140 @@ def recall_edge_precision(driver, limit=25):
     if not items:
         gaps.append(_edge_precision_reingest_gap())
     return _result(items, gaps, None, [])
+
+
+# ── callgraph-locality: the cross-package CALLS recall channel ────────────────
+# "Of a Java Method's outgoing typed CALLS, what share leave its own Package?" A
+# dedicated, global read-only entry point (facet-2) that COMPOSES with the facet-1
+# ``resolution`` marker: locality is computed over TYPED calls only, and the
+# name-collision noise (resolution='name' CALLS fan out to every same-simple-name
+# method corpus-wide) is carried in a SEPARATE count, never in the cross numerator.
+# BOUNDARY = Package (NOT Community — Community membership is a deterministic
+# structural partition that is definitionally vacuous for this cross-boundary
+# question; anchoring here on the real Package spine is what avoids the constant-zero
+# degenerate). Detect-only: it re-uses the CONTAINS spine + the resolution marker,
+# never re-derives either. Mirrors recall_edge_precision / recall_churn: SEPARATE
+# global entry point, standard result shape, uncapped (whole-graph scan bounded only
+# by ``limit``).
+#
+# Per Java caller Method the query aggregates its outgoing CALLS into the TRIPLE
+# (cross / same / unresolved) + a separate name_calls, one row per caller (id-ordered
+# before a server-side ``LIMIT $lim``, rebuild-deterministic; ``$lim`` the sole
+# parameter — ``.java`` / ``typed`` / ``name`` are DEV literals, never interpolated).
+# The Method->Package climb is a VARIABLE-LENGTH ``[:CONTAINS*]`` upward (Package ->
+# File -> Class -> ... -> Method): nested classes add Class->Class hops, so a fixed
+# path length would silently drop them. SCOPE is Java via ``caller.path ENDS WITH
+# '.java'`` (METHOD nodes carry no language tag, and Kotlin/others also emit Package
+# CONTAINS, so the path filter is the language boundary). BRANCH (ADR-20260703): no
+# explicit branch filter — exactly like recall_edge_precision — because node ids are
+# branch-scoped and CONTAINS / CALLS edges connect only same-branch nodes, so the
+# per-caller aggregation (keyed by the branch-scoped ``caller.id``) and its CONTAINS
+# climb stay within one branch plane; cross-branch nodes cannot be double-counted.
+# Only SCALAR projections are returned (never a whole node), so the per-node author
+# cannot leak. A callee with NO resolvable Package (``dp IS NULL``) is counted as its
+# own ``unresolved`` bucket — NEVER folded into ``same`` via a NULL comparison — and a
+# DEFAULT-PACKAGE caller (``cp IS NULL``, ``_package_fqn==''`` -> no Package node) is
+# flagged ``default_package`` with cross==same==0 (no computable locality), NEVER
+# collapsed as same-package. cross_ratio is guarded (0/0 -> 0.0, never NaN).
+_CALLGRAPH_LOCALITY = """
+MATCH (caller:Method)-[c:CALLS]->(callee)
+WHERE caller.path ENDS WITH '.java'
+OPTIONAL MATCH (cp:Package)-[:CONTAINS*]->(caller)
+OPTIONAL MATCH (dp:Package)-[:CONTAINS*]->(callee)
+WITH caller, cp,
+     c.resolution AS res,
+     dp.qualified_name AS callee_pkg
+WITH caller, cp,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NOT NULL
+                 AND callee_pkg <> cp.qualified_name THEN 1 END) AS cross,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NOT NULL
+                 AND callee_pkg = cp.qualified_name THEN 1 END) AS same,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NULL THEN 1 END) AS unresolved,
+     count(CASE WHEN res = 'name' THEN 1 END) AS name_calls
+RETURN caller.id AS id, labels(caller) AS labels, caller.name AS name,
+       caller.qualified_name AS qualified_name,
+       caller.path AS path, caller.start_line AS start_line, caller.end_line AS end_line,
+       caller.source_commit AS source_commit, caller.committed_at AS committed_at,
+       cross, same, unresolved, name_calls,
+       (cp IS NULL) AS default_package,
+       CASE WHEN (cross + same) > 0
+            THEN toFloat(cross) / (cross + same) ELSE 0.0 END AS cross_ratio
+ORDER BY id
+LIMIT $lim
+"""
+
+# Standing gap (ac-2 / ac-3 honesty), ALWAYS emitted: cross_ratio is a grounded
+# OBSERVATION over TYPED cross-package calls, not a quality verdict, and it is a
+# LOWER-completeness view by construction. (1) Methods with ZERO outgoing CALLS are
+# ABSENT from the result — absence is NOT high locality. (2) resolution='name'
+# name-collision calls are carried in name_calls, kept OUT of the cross numerator, so
+# name-fallback noise never inflates locality. (3) callees with no resolvable Package
+# are their own ``unresolved`` bucket, excluded from the cross/same denominator, never
+# counted as same-package. (4) DEFAULT-PACKAGE callers (no Package node) are flagged
+# default_package with no computable locality, never collapsed as same-package.
+# Completeness is NOT claimed.
+_CALLGRAPH_LOCALITY_GAP = (
+    "cross_ratio is a grounded observation over TYPED cross-package CALLS, not a "
+    "quality verdict: Methods with zero outgoing CALLS are ABSENT (absence is not "
+    "high locality); resolution='name' name-collision calls are carried in name_calls "
+    "and kept OUT of the cross numerator; callees with no resolvable Package are their "
+    "own unresolved bucket (excluded from the denominator, never same-package); a "
+    "default-package caller has no computable locality (default_package). Completeness "
+    "is NOT claimed"
+)
+
+
+def _callgraph_locality_reingest_gap() -> str:
+    """The DISTINCT empty-result advisory: an empty result is ambiguous — it can mean
+    a genuinely CALLS-free / non-Java graph OR a graph that PREDATES the CALLS +
+    per-edge resolution + Package CONTAINS spine this channel reads. Emitting this on
+    empty stops a predate-empty from reading as a false all-clear — mirrors
+    :func:`_edge_precision_reingest_gap`."""
+    return (
+        "no Java caller with outgoing typed CALLS found; if unexpected, the graph may "
+        "PREDATE the CALLS + per-edge resolution + Package CONTAINS spine this channel "
+        "reads (its edges carry no resolution property, or Package nodes were not "
+        "minted) — re-ingest before reading this as 'perfect locality'"
+    )
+
+
+def recall_callgraph_locality(driver, limit=25):
+    """Recall Java callers by cross-package CALLS locality — the facet-2 signal.
+
+    A SEPARATE, global read-only entry point that COMPOSES with the per-edge
+    ``resolution`` marker (facet-1): per Java caller Method it aggregates the outgoing
+    CALLS into the grounded TRIPLE — ``cross`` (typed calls to a DIFFERENT Package),
+    ``same`` (typed calls within the caller's Package), ``unresolved`` (typed calls
+    whose callee has no resolvable Package) — plus ``name_calls`` (resolution='name'
+    name-collision calls carried SEPARATELY, never in the cross numerator) and
+    ``cross_ratio`` = cross / (cross + same), guarded to 0.0 (never a 0/0 NaN). The
+    Method->Package boundary is a VARIABLE-LENGTH CONTAINS climb (nested classes add
+    hops). Scoped to Java by the ``.java`` caller path; id-ordered before a server-side
+    ``LIMIT $lim`` (``$lim`` the sole parameter, rebuild-deterministic). Each item is
+    the grounded CALLER (commit + file:line via :func:`_sources`, author-omitted —
+    scalar projections only, never a whole node). NO content-verdict field — a grounded
+    observation, not a quality judgment. Combinatorial only (one aggregation + dict
+    building), no LLM.
+
+    Gaps (ac-2 / ac-3 honesty): the standing gap is ALWAYS present (zero-CALLS absence,
+    name-collision split, unresolved bucket, default-package bucket — completeness never
+    claimed); on an EMPTY result a DISTINCT re-ingest advisory is added so a graph
+    predating the CALLS / resolution / CONTAINS spine is not mistaken for perfect
+    locality.
+    """
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_CALLGRAPH_LOCALITY, lim=limit)]
+    items = []
+    for rec in rows:
+        it = _item(rec, CALLS, 1)
+        it["cross"] = rec["cross"]
+        it["same"] = rec["same"]
+        it["unresolved"] = rec["unresolved"]
+        it["name_calls"] = rec["name_calls"]
+        it["default_package"] = rec["default_package"]
+        it["cross_ratio"] = rec["cross_ratio"]
+        items.append(it)
+    gaps = [_CALLGRAPH_LOCALITY_GAP]
+    if not items:
+        gaps.append(_callgraph_locality_reingest_gap())
+    return _result(items, gaps, None, [])
