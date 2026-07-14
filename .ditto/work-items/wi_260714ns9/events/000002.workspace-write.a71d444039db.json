@@ -1,0 +1,13 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260714ns9",
+  "seq": 2,
+  "actor": "workspace-write",
+  "event_id": "a71d444039db7dc99f2f8edc24f5303b9d47500e26ff98f495ba71c1625e0e64",
+  "ts": "2026-07-14T02:18:46.546Z",
+  "kind": "claim",
+  "payload": {
+    "claimed_branch": "feat/callgraph-locality-signal",
+    "posted_claim_marker": "claim:feat/callgraph-locality-signal"
+  }
+}

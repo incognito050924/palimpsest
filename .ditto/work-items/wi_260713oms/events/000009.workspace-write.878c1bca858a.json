@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713oms",
+  "seq": 9,
+  "actor": "workspace-write",
+  "event_id": "878c1bca858acacb85bd1f393d83a20f7b292579d283fba0d7b9768b580ddd74",
+  "ts": "2026-07-13T06:44:39.038Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-6",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/kg tests/extract/test_extract_java.py tests/extract/test_extract_kotlin.py tests/extract/test_extract_python.py",
+        "summary": "exit 4"
+      },
+      {
+        "kind": "command",
+        "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/kg tests/extract/test_extract.py tests/extract/test_extract_kotlin.py tests/extract/test_extract_python.py",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

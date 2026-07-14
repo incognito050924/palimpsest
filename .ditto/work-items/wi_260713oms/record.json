@@ -1,0 +1,119 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_260713oms",
+  "title": "다언어 온톨로지 — Rust extractor 추가 [seed]",
+  "source_request": "다언어 온톨로지 — Rust extractor 추가 [seed]\n\n> **설계 스레드 [seed]** · 우선순위 6번째 (kotlin > java > ts/js > python > golang > **rust**). #5에서 분리.\n> **SoT**: \\`docs/design-notes.md\\` 주제 **[A]**.\n\n## 요지\n\n온톨로지 하부(\\`FUNCTION\\` 노드 + community \\`_unit_of\\` de-Class화)는 #5 Kotlin 슬라이스(commit 138db70)에서 실현됐다. 이 언어는 **extractor 추가**(\\`extract/rust.py\\` + \\`queries/rust/*.scm\\`, tree-sitter-rust)가 주 작업.\n\n## 언어별 특수사항 (착수 시 design-notes [A]에 정련)\n\n- **클래스 없음**: module 안에 top-level 함수·\\`impl\\` 블록 메서드·\\`struct\\`·\\`trait\\`. de-Class화 대상.\n- **정적 타입**: DEPENDS_ON 파생 유효(P1 약화 불필요).\n- qualified_name 스킴: module path 기반 (A-Q6). \\`impl\\` 메서드를 Method로, free function을 Function으로. trait/제네릭·매크로는 착수 시 범위 판단.\n\n## 다음 단계\n\ndesign-notes 주제 [A]에 Rust 특유의 unit 매핑(impl 메서드·trait)을 정련 → 슬라이스 승격.",
+  "goal": "다언어 온톨로지 — Rust extractor 추가 [seed]",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "파일/모듈 직속 fn은 FUNCTION, impl/trait 블록 내 fn은 METHOD로 부모 컨텍스트에 따라 판별되고 File→CONTAINS→Function·Class→CONTAINS→Method 와이어링이 emit됨이 테스트로 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/extract/test_extract_rust.py::test_free_fn_is_function_contained_by_file",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "struct/enum/trait이 CLASS 노드로 추출되고 File→CONTAINS→Class 및 impl 메서드가 대상 타입 CLASS#name(params) qn으로 연결됨이 테스트로 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/extract/test_extract_rust.py::test_struct_and_enum_and_trait_are_classes tests/extract/test_extract_rust.py::test_impl_method_is_method_contained_by_type tests/extract/test_extract_rust.py::test_trait_signature_method",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "Function·Method 출발 name-based CALLS 엣지가 왕복 적재되고 동일 심볼 self-loop CALLS 엣지는 생성되지 않음이 테스트로 검증된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/extract/test_extract_rust.py::test_calls_edges_name_based",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-4",
+      "statement": "각 use 선언마다 File→참조 모듈 IMPORTS 엣지가 생성되고 외부 미해결 참조는 대상 노드 없이 honest external로 남는다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/extract/test_extract_rust.py::test_imports_and_honest_external",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-5",
+      "statement": "qualified_name이 inline mod 경로를 접두로 반영하고(module-path A-Q6) 파라미터 식별이 단순 타입명 규약을 따름이 테스트로 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/extract/test_extract_rust.py::test_inline_mod_path_prefix",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-6",
+      "statement": "community 결정론 분할과 rebuild-determinism이 유지되어 기존 Java/Kotlin/Python community·ingest 테스트가 전부 green이다(회귀 불변)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/kg tests/extract/test_extract_java.py tests/extract/test_extract_kotlin.py tests/extract/test_extract_python.py",
+          "summary": "exit 4"
+        },
+        {
+          "kind": "command",
+          "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/kg tests/extract/test_extract.py tests/extract/test_extract_kotlin.py tests/extract/test_extract_python.py",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-7",
+      "statement": "queries/rust/tags.scm이 per-language 파일로 존재하고 컴파일에 성공하며 전체 테스트 스위트가 통과한다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "/bin/bash -c .venv/bin/python -m pytest -q",
+          "summary": "exit 0"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [],
+  "worktrees": [],
+  "github_issue": {
+    "repo": "incognito050924/palimpsest",
+    "number": 12
+  },
+  "risks": [],
+  "runs": [],
+  "started_at_sha": "4eaf85b88afaa0a443e3690952f0fc6b46abbdd6",
+  "started_untracked_baseline": [
+    ".ditto/memory/events/memevt_retro_21405257835921a5.json",
+    ".ditto/work-items/wi_2607132g5/",
+    ".ditto/work-items/wi_260713mw8/",
+    ".ditto/work-items/wi_260713oms/"
+  ],
+  "created_at": "2026-07-13T06:23:27.675Z",
+  "updated_at": "2026-07-13T06:45:39.275Z",
+  "closed_at": "2026-07-13T06:45:39.275Z"
+}

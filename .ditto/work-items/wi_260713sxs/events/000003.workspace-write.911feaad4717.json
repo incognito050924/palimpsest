@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713sxs",
+  "seq": 3,
+  "actor": "workspace-write",
+  "event_id": "911feaad4717df57f5c39001a2ef6b6044a5c2e5a54c0b9ace51246807c0bd00",
+  "ts": "2026-07-13T09:17:42.001Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-3",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "grep -q 2026-07-13 — #1(F)·#6(B) 소유권 계약 docs/design-notes.md",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

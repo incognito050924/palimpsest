@@ -1,0 +1,267 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_260713bz4",
+  "title": "정밀 콜그래프 spine (C/T9)",
+  "source_request": "정밀 spine(주제 C/백로그 T9) 착수 — issue #1(코드품질 substrate)의 실질 선행. extract/java.py 등의 name-based CALLS over-matching 제거, 정밀 콜그래프 생산 엔진 구축. F-Q4(정체성 결정)는 병행 심의하되 이 spine과 독립.",
+  "goal": "Java 콜그래프의 잔여 over-matching을 줄이고, 모든 CALLS/DEPENDS_ON 엣지가 정밀-해석(typed)인지 name-based-fallback인지 per-edge 마커로 구분되게 한다 — test-impact/code-quality 두 소비자가 각자 필터. build-less·git=SoT drop→reload 결정론 유지.",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "Edge가 per-edge 해석 정밀도 마커를 실어 IR to/from_dict와 Neo4j projection을 왕복하고, 마커 없는 레거시 페이로드가 하위호환으로 로드된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713bz4/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "156 passed, exit 0 (fresh run)"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/extract/java.py",
+          "summary": "_precise 616-626 + _calls_edges seed 641-665 (unnarrowed seed marked typed) vs _depends_on_edges 515-526 (seed narrowed) — the ac-2 gap"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_edge_resolution_marker.py -q",
+          "summary": "round-trip + projection-row/merge tests pass"
+        },
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713bz4/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "156 passed, exit 0 (fresh run)"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/extract/java.py",
+          "summary": "_precise 616-626 + _calls_edges seed 641-665 (unnarrowed seed marked typed) vs _depends_on_edges 515-526 (seed narrowed) — the ac-2 gap"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_edge_resolution_marker.py -q",
+          "summary": "round-trip + projection-row/merge tests pass"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_edge_resolution_marker.py -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "Java 픽스처에서 타입 해석된 CALLS는 typed, 타입 미해석 fallback(other/chain 포함)은 name 으로 마킹됨을 확인한다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713bz4/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "156 passed, exit 0 (full pure-unit extract suite, no regressions)"
+        },
+        {
+          "kind": "command",
+          "command": "git stash push -- src/palimpsest/extract/java.py; pytest tests/extract/test_java_edge_resolution.py -q; git stash pop; pytest tests/extract/test_java_edge_resolution.py -q",
+          "summary": "TDD: 6 failed on AC assertions (red) -> 6 passed (green)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_java_edge_resolution.py -q",
+          "summary": "6 passed incl test_ac2_type_resolved_call_is_typed_and_chain_receiver_is_name, test_constraintA_typed_upgrades_name_regardless_of_source_order, test_constraintB_unnarrowed_collision_calls_marked_name, test_constraintB_narrowing_import_keeps_typed"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "156 passed, exit 0 (fresh run)"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/extract/java.py",
+          "summary": "_precise 616-626 + _calls_edges seed 641-665 (unnarrowed seed marked typed) vs _depends_on_edges 515-526 (seed narrowed) — the ac-2 gap"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/extract/java.py",
+          "lines": {
+            "start": 641,
+            "end": 665
+          },
+          "summary": "seed = all same-name classes, whole set marked typed under narrowing import"
+        },
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713bz4/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "156 passed, exit 0 (full pure-unit extract suite, no regressions)"
+        },
+        {
+          "kind": "command",
+          "command": "git stash push -- src/palimpsest/extract/java.py; pytest tests/extract/test_java_edge_resolution.py -q; git stash pop; pytest tests/extract/test_java_edge_resolution.py -q",
+          "summary": "TDD: 6 failed on AC assertions (red) -> 6 passed (green)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_java_edge_resolution.py -q",
+          "summary": "6 passed incl test_ac2_type_resolved_call_is_typed_and_chain_receiver_is_name, test_constraintA_typed_upgrades_name_regardless_of_source_order, test_constraintB_unnarrowed_collision_calls_marked_name, test_constraintB_narrowing_import_keeps_typed"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "156 passed, exit 0 (fresh run)"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/extract/java.py",
+          "summary": "_precise 616-626 + _calls_edges seed 641-665 (unnarrowed seed marked typed) vs _depends_on_edges 515-526 (seed narrowed) — the ac-2 gap"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/extract/java.py",
+          "lines": {
+            "start": 641,
+            "end": 665
+          },
+          "summary": "seed = all same-name classes, whole set marked typed under narrowing import"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_java_edge_resolution.py -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "Java DEPENDS_ON이 import로 disambiguate되어 같은 simple-name 다른 패키지 클래스에 대한 거짓 엣지가 제거되고, disambiguate 불가 시 name-based 엣지를 유지+마킹한다(거짓음성 방지)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713bz4/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "156 passed, exit 0 (full pure-unit extract suite, no regressions)"
+        },
+        {
+          "kind": "command",
+          "command": "git stash push -- src/palimpsest/extract/java.py; pytest tests/extract/test_java_edge_resolution.py -q; git stash pop; pytest tests/extract/test_java_edge_resolution.py -q",
+          "summary": "TDD: 6 failed on AC assertions (red) -> 6 passed (green)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_java_edge_resolution.py -q -k ac3",
+          "summary": "test_ac3_depends_on_import_narrows_to_single_edge + test_ac3_depends_on_without_import_keeps_both_edges_as_name passed"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "156 passed, exit 0 (fresh run)"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/extract/java.py",
+          "summary": "_precise 616-626 + _calls_edges seed 641-665 (unnarrowed seed marked typed) vs _depends_on_edges 515-526 (seed narrowed) — the ac-2 gap"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/test_java_edge_resolution.py -q -k ac3",
+          "summary": "import-narrows + without-import fixtures pass"
+        }
+      ]
+    },
+    {
+      "id": "ac-4",
+      "statement": "정밀화·마커 도입 후에도 drop→reload 재구축과 Community 분할이 결정론적으로 재현된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "file",
+          "path": ".ditto/local/runs/wi_260713bz4/coverage.json",
+          "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -m pytest tests/extract/ -q",
+          "summary": "156 passed, exit 0 (fresh run)"
+        },
+        {
+          "kind": "file",
+          "path": "src/palimpsest/extract/java.py",
+          "summary": "_precise 616-626 + _calls_edges seed 641-665 (unnarrowed seed marked typed) vs _depends_on_edges 515-526 (seed narrowed) — the ac-2 gap"
+        },
+        {
+          "kind": "command",
+          "command": ".venv/bin/python -c 'extract+compute_communities twice, assert run1==run2'",
+          "summary": "run1==run2: True"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [
+    "src/palimpsest/ir.py",
+    "src/palimpsest/kg/ingest.py",
+    "tests/extract/test_edge_resolution_marker.py",
+    "src/palimpsest/extract/java.py",
+    "tests/extract/test_java_edge_resolution.py"
+  ],
+  "worktrees": [],
+  "declared_risk": {
+    "non_local": true
+  },
+  "follow_ups": [
+    {
+      "kind": "idea",
+      "note": "overload arity 구분: 타입 해석된 receiver에서 같은 이름 여러 overload를 인자 수/타입으로 구분 (현재는 (class,name)로 전부 연결, java.py:602). build-less라 best-effort. 증분1에서 의도적으로 제외 — 반드시 후속 진행."
+    },
+    {
+      "kind": "idea",
+      "note": "증분2 — 정적 타입 언어(Go/TS/Kotlin/Rust) 타입해석 이식: Java의 receiver-type CALLS 해석 + per-edge 마커(증분1 산출)를 재사용해 이식. 언어별 locals.scm/타입바인딩 greenfield. Python/JS는 동적 상한이라 name-based+마커로 남김."
+    }
+  ],
+  "risks": [],
+  "re_entry": {
+    "command": "# resolve the land blocker, then re-run: ditto autopilot complete --workItem wi_260713bz4",
+    "fresh_evidence_needed": [
+      "land aborted — 91 working-tree path(s) outside the declared change_surface: .: .ditto/work-items/wi_2607132g5/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_2607132g5/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_2607132g5/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_2607132g5/events/000003.workspace-write.ef19d42ecadc.json, .ditto/work-items/wi_2607132g5/events/000004.workspace-write.f0a72ad1eee7.json, .ditto/work-items/wi_2607132g5/events/000005.workspace-write.7299da5a80d9.json, .ditto/work-items/wi_2607132g5/events/000006.workspace-write.d22029f6f722.json, .ditto/work-items/wi_2607132g5/record.json, .ditto/work-items/wi_2607133h2/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_2607133h2/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_2607133h2/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_2607133h2/events/000003.workspace-write.a64f953050de.json, .ditto/work-items/wi_2607133h2/events/000004.workspace-write.b4b907a87571.json, .ditto/work-items/wi_2607133h2/events/000005.workspace-write.fe2a7ba9c2e2.json, .ditto/work-items/wi_2607133h2/events/000006.workspace-write.cca293ede0f8.json, .ditto/work-items/wi_2607133h2/events/000007.workspace-write.58931f65ee3d.json, .ditto/work-items/wi_2607133h2/events/000008.workspace-write.a540042a5a85.json, .ditto/work-items/wi_2607133h2/record.json, .ditto/work-items/wi_260713bz4/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713bz4/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713bz4/events/000002.workspace-write.068c2b30c5ad.json, .ditto/work-items/wi_260713bz4/events/000003.workspace-write.2f9b5caacdc9.json, .ditto/work-items/wi_260713bz4/events/000004.workspace-write.df3538b483b8.json, .ditto/work-items/wi_260713bz4/events/000005.workspace-write.600191244f7c.json, .ditto/work-items/wi_260713bz4/events/000006.workspace-write.3f803158119c.json, .ditto/work-items/wi_260713bz4/events/000007.workspace-write.a47034530f93.json, .ditto/work-items/wi_260713bz4/events/000008.workspace-write.a996e9c0e699.json, .ditto/work-items/wi_260713bz4/events/000009.workspace-write.29eec21aaed2.json, .ditto/work-items/wi_260713bz4/events/000010.workspace-write.3c4c56191438.json, .ditto/work-items/wi_260713bz4/events/000011.workspace-write.298bb2494dc6.json, .ditto/work-items/wi_260713bz4/events/000012.workspace-write.c5a1eb0cfb4b.json, .ditto/work-items/wi_260713bz4/events/000013.workspace-write.66898db0bd24.json, .ditto/work-items/wi_260713bz4/record.json, .ditto/work-items/wi_260713mw8/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713mw8/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713mw8/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_260713mw8/events/000003.workspace-write.c641f39f1ed0.json, .ditto/work-items/wi_260713mw8/events/000004.workspace-write.b36d769802f5.json, .ditto/work-items/wi_260713mw8/events/000005.workspace-write.f9f10d13322b.json, .ditto/work-items/wi_260713mw8/events/000006.workspace-write.f348d97ef9b0.json, .ditto/work-items/wi_260713mw8/events/000007.workspace-write.c11f2f2d222b.json, .ditto/work-items/wi_260713mw8/events/000008.workspace-write.ce4868f0b0f7.json, .ditto/work-items/wi_260713mw8/events/000009.workspace-write.032d8fb1cb90.json, .ditto/work-items/wi_260713mw8/events/000010.workspace-write.b13c71a2c042.json, .ditto/work-items/wi_260713mw8/events/000011.workspace-write.b54a563b601a.json, .ditto/work-items/wi_260713mw8/events/000012.workspace-write.d75a413c8a78.json, .ditto/work-items/wi_260713mw8/record.json, .ditto/work-items/wi_260713oms/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713oms/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713oms/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_260713oms/events/000003.workspace-write.c3f75136da66.json, .ditto/work-items/wi_260713oms/events/000004.workspace-write.1896b21f27d6.json, .ditto/work-items/wi_260713oms/events/000005.workspace-write.90d8b057148b.json, .ditto/work-items/wi_260713oms/events/000006.workspace-write.b198cb91359e.json, .ditto/work-items/wi_260713oms/events/000007.workspace-write.40e15e1f95e8.json, .ditto/work-items/wi_260713oms/events/000008.workspace-write.449fed3f671d.json, .ditto/work-items/wi_260713oms/events/000009.workspace-write.878c1bca858a.json, .ditto/work-items/wi_260713oms/events/000010.workspace-write.c3b7075029f7.json, .ditto/work-items/wi_260713oms/events/000011.workspace-write.84d25c3498fe.json, .ditto/work-items/wi_260713oms/events/000012.workspace-write.d75a413c8a78.json, .ditto/work-items/wi_260713oms/record.json, .ditto/work-items/wi_260713sgq/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713sgq/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713sgq/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_260713sgq/events/000003.workspace-write.bed7b95c4575.json, .ditto/work-items/wi_260713sgq/events/000004.workspace-write.a2521167c576.json, .ditto/work-items/wi_260713sgq/events/000005.workspace-write.3b402dd40c85.json, .ditto/work-items/wi_260713sgq/events/000006.workspace-write.81f47d841954.json, .ditto/work-items/wi_260713sgq/events/000007.workspace-write.efcaedbda42b.json, .ditto/work-items/wi_260713sgq/events/000008.workspace-write.0ef788e81635.json, .ditto/work-items/wi_260713sgq/events/000009.workspace-write.bd422660cb49.json, .ditto/work-items/wi_260713sgq/events/000010.workspace-write.fd0367c511ce.json, .ditto/work-items/wi_260713sgq/record.json, .ditto/work-items/wi_260713sxs/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713sxs/events/000001.workspace-write.de6de095088e.json, .ditto/work-items/wi_260713sxs/events/000002.workspace-write.58901ba7176e.json, .ditto/work-items/wi_260713sxs/events/000003.workspace-write.911feaad4717.json, .ditto/work-items/wi_260713sxs/events/000004.workspace-write.ce913c143bdb.json, .ditto/work-items/wi_260713sxs/events/000005.workspace-write.a2728ffb5bdc.json, .ditto/work-items/wi_260713sxs/record.json, .ditto/work-items/wi_260713zlo/events/000000.workspace-write.89120a853494.json, .ditto/work-items/wi_260713zlo/events/000001.workspace-write.597fcc6c2756.json, .ditto/work-items/wi_260713zlo/events/000002.workspace-write.80d66f889ea4.json, .ditto/work-items/wi_260713zlo/events/000003.workspace-write.5273e277d718.json, .ditto/work-items/wi_260713zlo/events/000004.workspace-write.e68aaa878f25.json, .ditto/work-items/wi_260713zlo/events/000005.workspace-write.d87c819ab8b0.json, .ditto/work-items/wi_260713zlo/events/000006.workspace-write.9ec6ab577dd9.json, .ditto/work-items/wi_260713zlo/events/000007.workspace-write.f69afd4432ee.json, .ditto/work-items/wi_260713zlo/events/000008.workspace-write.7a84e6874cdf.json, .ditto/work-items/wi_260713zlo/events/000009.workspace-write.ed85366edd4e.json, .ditto/work-items/wi_260713zlo/record.json. These are likely files an owner changed but did NOT report in its record-result changed_files (change_surface under-declaration), or genuinely unrelated concurrent work. Next: check the owners' reported changed_files against `git status`, then either expand the work item's changed_files to include the real run output, or stash the unrelated work — then re-run `ditto autopilot complete`. (Run byproducts under .ditto/memory are auto-absorbed; these paths are not.)"
+    ]
+  },
+  "runs": [],
+  "started_at_sha": "fb6ab18fa587d6ec386c0289222b2d7137981929",
+  "started_untracked_baseline": [
+    ".ditto/memory/events/memevt_retro_21405257835921a5.json",
+    ".ditto/work-items/wi_2607132g5/",
+    ".ditto/work-items/wi_2607133h2/",
+    ".ditto/work-items/wi_260713bz4/",
+    ".ditto/work-items/wi_260713mw8/",
+    ".ditto/work-items/wi_260713oms/",
+    ".ditto/work-items/wi_260713sgq/",
+    ".ditto/work-items/wi_260713sxs/",
+    ".ditto/work-items/wi_260713zlo/"
+  ],
+  "created_at": "2026-07-13T15:28:10.428Z",
+  "updated_at": "2026-07-13T21:28:23.435Z",
+  "closed_at": "2026-07-13T21:28:23.434Z"
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_2607132g5",
+  "seq": 3,
+  "actor": "workspace-write",
+  "event_id": "ef19d42ecadc3ed6f1173f2f8e44afb0e14fa17827e2d7d8798c1b2202f58529",
+  "ts": "2026-07-13T05:09:38.762Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-1",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/kg/test_ingest.py::test_unregistered_edge_kind_fails_closed_before_cypher -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

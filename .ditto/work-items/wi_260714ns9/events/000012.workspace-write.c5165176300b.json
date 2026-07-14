@@ -1,0 +1,52 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260714ns9",
+  "seq": 12,
+  "actor": "workspace-write",
+  "event_id": "c5165176300bf627fab4f3371359a705d83b1373eb66b13e9968147217284cb5",
+  "ts": "2026-07-14T05:45:45.336Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-3",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "file",
+        "path": ".ditto/local/runs/wi_260714ns9/coverage.json",
+        "summary": "pre-mortem coverage sweep artifact (plan-stage close)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/ -q",
+        "summary": "전체 464 passed, 0 failed (live Neo4j testcontainers 포함)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/recall/test_recall_composite.py tests/kg/test_curate_integration.py -q",
+        "summary": "composite recall 5(mock+live) + curate integration 5(live) passed"
+      },
+      {
+        "kind": "file",
+        "path": "src/palimpsest/recall/graphrag.py",
+        "lines": {
+          "start": 1543,
+          "end": 1637
+        },
+        "summary": "recall_refactor_candidates + _REFACTOR_CANDIDATES 단일 composite 질의 + standing/absent gap"
+      },
+      {
+        "kind": "note",
+        "summary": "Fresh-context ditto:verifier final_verdict=pass; ac-1/2/3 pass; scope creep 없음; _cmd_curate 회귀 없음; git diff HEAD -- src/palimpsest/kg/summary.py empty(로더 무변경)"
+      },
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/curate/ tests/recall/test_recall_composite.py tests/kg/test_curate_integration.py -q",
+        "summary": "40 passed (live Neo4j testcontainers 포함) — fresh-context verifier 실행"
+      },
+      {
+        "kind": "note",
+        "summary": "ditto:verifier(별도 컨텍스트) final_verdict=pass. 로더 무변경: git diff HEAD -- src/palimpsest/kg/summary.py empty. composite 선택 결정론·provider-free, honest empty-live 정확 처리."
+      }
+    ]
+  }
+}

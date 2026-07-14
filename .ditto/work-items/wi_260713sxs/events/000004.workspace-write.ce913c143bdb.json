@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713sxs",
+  "seq": 4,
+  "actor": "workspace-write",
+  "event_id": "ce913c143bdb6c0ef25f376216613db52a21557761067331e531c2c5685e94b0",
+  "ts": "2026-07-13T09:17:44.278Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-4",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "bash -c gh issue view 1 --repo incognito050924/palimpsest --comments | grep -q \"합치지 않고 분리 유지\" && gh issue view 6 --repo incognito050924/palimpsest --comments | grep -q \"coverage facet SoT 소유\"",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

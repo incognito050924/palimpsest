@@ -1,0 +1,103 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_260713sgq",
+  "title": "다언어 온톨로지 — extractor dispatch 배선 (cli/backfill → EXTRACTORS_BY_EXT)",
+  "source_request": "다언어 온톨로지 — extractor dispatch 배선 (cli/backfill → EXTRACTORS_BY_EXT)\n\n> #10 Python extractor 슬라이스에서 발견. coverage 스윕이 밝힌 구조적 사실.\n\n## 문제\n`EXTRACTORS_BY_EXT`(확장자→추출기 dispatch, extract/__init__.py)가 **프로덕션에서 아무도 안 쓴다**. `cli._cmd_ingest`(cli.py)와 `backfill.backfill`(backfill.py)이 `extract`를 부르는데 이건 `extract_java`로 하드코딩돼 있다. 그래서 Kotlin·Python extractor는 추가됐지만 **end-to-end로는 死코드** — 어떤 실행 경로도 .kt/.py를 라우팅하지 않는다.\n\n## 작업\n- cli/backfill의 진입점이 파일 확장자로 `EXTRACTORS_BY_EXT`를 디스패치하도록 배선.\n- 다언어 코퍼스(Java+Kotlin+Python 혼재)에서 확장자별 올바른 추출기 선택 + community 결정론 유지 확인.\n\n## 주의\n- Java/Kotlin 공유 표면(cli.py/backfill.py) 변경이라 회귀 위험 — 기존 Java ingest·backfill 불변 확인 필요.\n- 이게 배선돼야 다언어 extractor들이 실제 가치를 낸다(현재 라이브러리 슬라이스는 inert).",
+  "goal": "다언어 온톨로지 — extractor dispatch 배선 (cli/backfill → EXTRACTORS_BY_EXT)",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "cli._cmd_ingest·backfill.backfill·reconcile.capture 세 진입점이 extract_java 대신 신규 dispatch 함수를 호출한다 (grep로 세 파일에서 dispatch 호출 확인, extract_java 직접 호출 0)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "bash -c test $(grep -c \"dispatch(\" src/palimpsest/cli.py src/palimpsest/backfill.py src/palimpsest/reconcile.py | grep -c \":1\") -eq 3 && ! grep -qE \"[^_a-z]extract\\(\" src/palimpsest/cli.py src/palimpsest/backfill.py src/palimpsest/reconcile.py",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "혼재 코퍼스(.java/.kt/.py/.rs/.ts) 픽스처에 dispatch 실행 시 Java CLASS·Kotlin FUNCTION·Python FUNCTION·Rust FUNCTION·TS FUNCTION 노드가 모두 결과 IR에 존재한다 (테스트가 kind별 노드 카운트>0 단언)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "python -m pytest tests/extract/test_dispatch.py::test_dispatch_routes_each_language -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "ECMAScript family에서 .ts가 .js를 상대경로 import할 때 IMPORTS 엣지 dst가 대상 File qualified_name으로 해석되고 서로 다른 언어군 노드 사이 CALLS 엣지 개수가 0이다 (SC-B 테스트가 단언)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "python -m pytest tests/extract/test_dispatch.py::test_dispatch_ecmascript_unified_and_scb -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-4",
+      "statement": "pure-Java 픽스처에서 dispatch가 반환한 nodes 리스트와 edges 리스트가 extract_java가 반환한 것과 정확히 일치하는지 검증하는 회귀 테스트가 통과한다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "python -m pytest tests/extract/test_dispatch.py::test_dispatch_pure_java_identical_to_extract_java -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-5",
+      "statement": "병합 IR에서 REPO kind 노드 개수가 정확히 1이고 dispatch 결과에 augment_communities를 2회 적용한 Community 멤버십 집합이 일치한다 (테스트가 단언)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "python -m pytest tests/extract/test_dispatch.py::test_dispatch_single_repo_node tests/extract/test_dispatch.py::test_dispatch_community_deterministic -q",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-6",
+      "statement": "pytest tests/ 전체 실행이 통과한다 (실행 로그)",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "python -m pytest tests/ -q",
+          "summary": "exit 0"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [],
+  "worktrees": [],
+  "github_issue": {
+    "repo": "incognito050924/palimpsest",
+    "number": 13
+  },
+  "risks": [],
+  "runs": [],
+  "started_at_sha": "0b5ef804da9e06ce0bbc303dfa2c3a22bda755e2",
+  "started_untracked_baseline": [
+    ".ditto/memory/events/memevt_retro_21405257835921a5.json",
+    ".ditto/work-items/wi_2607132g5/",
+    ".ditto/work-items/wi_260713mw8/",
+    ".ditto/work-items/wi_260713oms/",
+    ".ditto/work-items/wi_260713sgq/"
+  ],
+  "created_at": "2026-07-13T06:54:54.480Z",
+  "updated_at": "2026-07-13T07:16:39.271Z",
+  "closed_at": "2026-07-13T07:16:39.270Z"
+}

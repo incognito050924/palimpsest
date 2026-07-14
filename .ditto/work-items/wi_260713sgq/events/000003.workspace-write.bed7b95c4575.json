@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713sgq",
+  "seq": 3,
+  "actor": "workspace-write",
+  "event_id": "bed7b95c4575919deb8840cac98e96f31faf6153f88ae5fdf9b1623526a8bff4",
+  "ts": "2026-07-13T07:15:31.902Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-1",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "bash -c test $(grep -c \"dispatch(\" src/palimpsest/cli.py src/palimpsest/backfill.py src/palimpsest/reconcile.py | grep -c \":1\") -eq 3 && ! grep -qE \"[^_a-z]extract\\(\" src/palimpsest/cli.py src/palimpsest/backfill.py src/palimpsest/reconcile.py",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

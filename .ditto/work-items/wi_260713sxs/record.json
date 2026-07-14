@@ -1,0 +1,67 @@
+{
+  "schema_version": "0.1.0",
+  "id": "wi_260713sxs",
+  "title": "design-notes [B]/[F]에 coverage facet 소유권 위임 계약 반영 + GitHub #1/#6 상호 링크 — 중복정의(dr",
+  "source_request": "#1, #6 합치는 대신 분리 유지 + F-Q5의 coverage/응집 facet을 주제 B(#6)에 위임하는 소유권 계약을 design-notes와 두 이슈에 반영",
+  "goal": "design-notes [B]/[F]에 coverage facet 소유권 위임 계약 반영 + GitHub #1/#6 상호 링크 — 중복정의(drift) 방지",
+  "acceptance_criteria": [
+    {
+      "id": "ac-1",
+      "statement": "design-notes.md [F] F-Q5에 coverage/응집 facet의 SoT를 주제 B(#6)가 소유하고 F는 재정의하지 않고 위임한다는 문구가 grep로 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "grep -q coverage/응집 facet의 SoT는 주제 B(#6)가 소유 docs/design-notes.md",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-2",
+      "statement": "design-notes.md [B]에 coverage facet 소유 + #1[F]의 첫 실증 파일럿(B-후보1≡F-후보1 동형)이라는 관계·경계 절이 grep로 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "grep -q ## 7. 관계 — 주제 F(#1)와의 소유권 경계 docs/design-notes.md",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-3",
+      "statement": "design-notes.md changelog 섹션에 오늘자(2026-07-13) 위임계약 반영 항목 1줄이 grep로 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "grep -q 2026-07-13 — #1(F)·#6(B) 소유권 계약 docs/design-notes.md",
+          "summary": "exit 0"
+        }
+      ]
+    },
+    {
+      "id": "ac-4",
+      "statement": "GitHub 이슈 #1에 #6으로 coverage facet을 위임한다는 링크 코멘트가, #6에 #1[F]와의 소유권 관계 링크 코멘트가 게시된 것이 gh issue view로 확인된다",
+      "verdict": "pass",
+      "evidence": [
+        {
+          "kind": "command",
+          "command": "bash -c gh issue view 1 --repo incognito050924/palimpsest --comments | grep -q \"합치지 않고 분리 유지\" && gh issue view 6 --repo incognito050924/palimpsest --comments | grep -q \"coverage facet SoT 소유\"",
+          "summary": "exit 0"
+        }
+      ]
+    }
+  ],
+  "status": "done",
+  "owner_profile": "workspace-write",
+  "child_ids": [],
+  "changed_files": [],
+  "worktrees": [],
+  "risks": [],
+  "runs": [],
+  "created_at": "2026-07-13T09:15:49.935Z",
+  "updated_at": "2026-07-13T09:18:07.397Z",
+  "closed_at": "2026-07-13T09:18:07.397Z"
+}

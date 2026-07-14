@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713zlo",
+  "seq": 6,
+  "actor": "workspace-write",
+  "event_id": "9ec6ab577dd9994c37d99585b1d33c64f40d99ce86ee512ff4403878782fe8e0",
+  "ts": "2026-07-13T08:15:04.081Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-1",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "pytest tests/e2e/test_reconcile_e2e.py --collect-only -q",
+        "summary": "exit 0"
+      },
+      {
+        "kind": "command",
+        "command": "pytest tests/e2e/test_reconcile_e2e.py --collect-only -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

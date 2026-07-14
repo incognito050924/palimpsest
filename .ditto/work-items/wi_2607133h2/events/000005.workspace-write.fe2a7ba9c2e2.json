@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_2607133h2",
+  "seq": 5,
+  "actor": "workspace-write",
+  "event_id": "fe2a7ba9c2e21d15a1bfd03cf25b12fccde7e1322aae5413a28aee30e708fb14",
+  "ts": "2026-07-13T15:07:19.801Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-3",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": ".venv/bin/python -m pytest tests/test_cli_annotations.py -q",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}

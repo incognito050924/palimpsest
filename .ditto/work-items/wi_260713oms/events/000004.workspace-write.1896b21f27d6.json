@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1.0",
+  "work_item_id": "wi_260713oms",
+  "seq": 4,
+  "actor": "workspace-write",
+  "event_id": "1896b21f27d67355c0688288b4ff64c36067598e6694d147140490400993e9a2",
+  "ts": "2026-07-13T06:44:02.340Z",
+  "kind": "verdict",
+  "payload": {
+    "criterion_id": "ac-2",
+    "verdict": "pass",
+    "evidence": [
+      {
+        "kind": "command",
+        "command": "/bin/bash -c .venv/bin/python -m pytest -q tests/extract/test_extract_rust.py::test_struct_and_enum_and_trait_are_classes tests/extract/test_extract_rust.py::test_impl_method_is_method_contained_by_type tests/extract/test_extract_rust.py::test_trait_signature_method",
+        "summary": "exit 0"
+      }
+    ]
+  }
+}
