@@ -144,6 +144,91 @@ def test_curate_provenance_survives_load_byte_identical(ingested, ir, tmp_path, 
     assert row["m"] == MODEL
 
 
+def _canned_candidate_item(method_qn, klass_qn):
+    """A recall_refactor_candidates-shaped item grounded in the two REAL fixture nodes —
+    stands in for a live composite witness (structurally vacuous on the precision-resolved
+    commute corpus; facet-3 finding), so the composite flow -> loader path is exercised
+    end to end without fabricating a graph witness."""
+    return {
+        "id": method_qn,
+        "kind": "Method",
+        "name": method_qn.rsplit("#", 1)[-1],
+        "qualified_name": method_qn,
+        "relation": "CALLS",
+        "depth": 1,
+        "sources": {
+            "source_commit": SOURCE_COMMIT,
+            "path": "src/main/java/x/C.java",
+            "start_line": 10,
+            "end_line": 40,
+            "committed_at": "2025-09-03T16:22:54+09:00",
+        },
+        "grounding_ids": (method_qn, klass_qn),
+        "facts": "typed_cross_package_calls=1; typed_same_package_calls=0; "
+        "typed_unresolved_calls=0; name_resolved_calls=1",
+    }
+
+
+def _materialise_composite(tmp_path, monkeypatch, ir):
+    """Run the `refactor-candidates` CLI (recall composite + LLM both stubbed) and return
+    the git-SoT payload directory — the composite flow's materialisation half."""
+    import palimpsest.cli as cli
+    import palimpsest.curate as curate_pkg
+
+    method = next(n for n in ir.nodes if n.kind == METHOD)
+    klass = next(n for n in ir.nodes if n.kind == CLASS)
+    item = _canned_candidate_item(method.qualified_name, klass.qualified_name)
+    canned = {
+        "items": [item], "sources": [], "summaries": [], "risks": [], "decisions": [],
+        "relations": [], "gaps": ["standing gap"], "confidence": 1.0, "expand_handle": None,
+    }
+
+    class _NullCM:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(cli, "_driver", lambda: _NullCM())
+    monkeypatch.setattr(cli, "recall_refactor_candidates", lambda driver, limit: canned)
+    monkeypatch.setattr(
+        curate_pkg, "default_generate",
+        lambda prompt, **kw: _stub_llm(method.qualified_name, klass.qualified_name),
+    )
+    out = tmp_path / "composite-summaries"
+    rc = main([
+        "refactor-candidates",
+        "--generator", GENERATOR,
+        "--model", MODEL,
+        "--created-at", "2026-07-12T09:00:00+09:00",
+        "--out", str(out),
+        "--max", "25",
+    ])
+    assert rc == 0
+    return out
+
+
+def test_composite_payload_loads_as_inferred_end_to_end(ingested, ir, tmp_path, monkeypatch):
+    """ac-3: a payload from the COMPOSITE flow (`refactor-candidates`) loads through the
+    UNCHANGED idempotent inferred loader as an inferred SUMMARIZES edge grounded in real
+    code — the same loader-reuse the `curate` command relies on, proven for the composite
+    path (LLM output frozen to git-SoT, honest non-self provenance)."""
+    payload_dir = _materialise_composite(tmp_path, monkeypatch, ir)
+    on_disk = _read_payload_file(next(payload_dir.glob("*.json")))[0]
+    assert on_disk.generator == GENERATOR != "palimpsest"
+    assert on_disk.model == MODEL != "palimpsest"
+    assert on_disk.semantic_verdict is None   # no content-verdict frozen
+
+    result = _load_dir(ingested, payload_dir)
+    assert result.loaded == 1 and result.rejected == 0
+    with ingested.session() as session:
+        inferred = session.run(
+            "MATCH ()-[r:SUMMARIZES]->() WHERE r.edge_kind = 'inferred' RETURN count(r) AS c"
+        ).single()["c"]
+    assert inferred >= 1
+
+
 def test_curate_rebuild_is_deterministic(clean_db, ir, tmp_path, monkeypatch):
     """AC7 (VG2): ingest+load -> drop everything -> rebuild from the SAME git-SoT
     reproduces an identical graph (nodes, edges, ids, edge_kind, grounding)."""

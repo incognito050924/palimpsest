@@ -39,6 +39,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -57,6 +58,7 @@ from palimpsest.recall import (
     recall_test_impact,
     recall_edge_precision,
     recall_callgraph_locality,
+    recall_refactor_candidates,
 )
 from palimpsest.recall.graphrag import reconcile_recall
 from palimpsest.reconcile import capture
@@ -276,6 +278,48 @@ def _cmd_load(args) -> None:
     _print_load_result(args.payload, result)
 
 
+def _payload_path(outdir: Path, request) -> Path:
+    """The deterministic materialisation path for a request: ``<out>/<id>.json``. The
+    id is the provenance-keyed summary_id (shared with the loader); the ``summary:``
+    prefix is dropped for a filesystem-safe name (the id itself is unchanged in the
+    graph)."""
+    sid = summary_id(request.target_id, request.generator, request.model, request.source_commit)
+    return outdir / f"{sid.split(':', 1)[1]}.json"
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write ``content`` to ``path`` ATOMICALLY (temp file in the same dir + os.replace)
+    so a crash mid-write never leaves a TORN file that the directory batch-loader would
+    then ingest as corrupt JSON. The temp is removed on any failure."""
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _materialize_idempotent(path: Path, content: str) -> None:
+    """Freeze ``content`` to ``path`` idempotently: if the file already exists for this
+    (provenance-keyed) id, re-materialising is a no-op when identical and a REFUSAL when
+    the content diverges — the LLM output is frozen to git-SoT, so a re-run must not
+    silently rewrite a summary under the same provenance. First write is atomic."""
+    if path.exists():
+        if path.read_text(encoding="utf-8") == content:
+            return  # identical -> frozen, no-op
+        raise ValueError(
+            f"refusing to overwrite {path} with DIVERGENT content under the same "
+            f"provenance (summary_id is provenance-keyed; the frozen LLM output must "
+            f"not change on re-run) — delete the file to regenerate"
+        )
+    _atomic_write_text(path, content)
+
+
 def _cmd_curate(args) -> None:
     # The isolated generative producer is imported LAZILY here (never at cli
     # module load) so `import palimpsest.cli` stays outside curate's import
@@ -299,15 +343,58 @@ def _cmd_curate(args) -> None:
         request, generate=lambda prompt: default_generate(prompt, model=request.model)
     )
 
-    sid = summary_id(request.target_id, request.generator, request.model, request.source_commit)
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
     # The loader reads a directory of JSON ARRAYS (cli._read_payload_file), so the
-    # materialised file is a one-element array. The ``summary:`` prefix is dropped
-    # for a filesystem-safe name; the id itself is unchanged in the graph.
-    path = outdir / f"{sid.split(':', 1)[1]}.json"
-    path.write_text(json.dumps([payload], ensure_ascii=False, indent=2), encoding="utf-8")
+    # materialised file is a one-element array, frozen atomically + idempotently.
+    path = _payload_path(outdir, request)
+    _materialize_idempotent(path, json.dumps([payload], ensure_ascii=False, indent=2))
     print(f"CURATED {path} (target={request.target_id}, model={request.model})")
+
+
+def _cmd_refactor_candidates(args) -> int:
+    # facet-3 composite flow: the recall-side deterministic composite SELECTS the
+    # candidates (provider-free, id-ordered LIMIT — the LLM never selects, F-Q6),
+    # then the isolated producer SYNTHESISES a grounded observation per pre-selected
+    # tuple, materialised atomically + idempotently to git-SoT. Loading stays with
+    # `load`. The producer is imported LAZILY (isolation probe stays green).
+    from palimpsest.curate import CurateRequest, default_generate, produce
+
+    with _driver() as driver:
+        result = recall_refactor_candidates(driver, limit=args.max)
+    items = result["items"]
+    if not items:
+        # Honest empty: print the gaps so a 0-candidate run is never a silent
+        # all-clear (a precision-resolved corpus legitimately has no composite).
+        print("REFACTOR-CANDIDATES: 0 composite candidates")
+        for gap in result["gaps"]:
+            print(f"  gap: {gap}")
+        return 0
+
+    outdir = Path(args.out)
+    outdir.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for it in items:
+        request = CurateRequest(
+            target_id=it["id"],
+            grounding_ids=tuple(it["grounding_ids"]),
+            facts=it["facts"],
+            # The commit summarised is the candidate's OWN grounded commit (honest
+            # provenance), not a caller-supplied one.
+            source_commit=it["sources"]["source_commit"],
+            created_at=args.created_at,
+            generator=args.generator,
+            model=args.model,
+        )
+        payload = produce(
+            request, generate=lambda prompt: default_generate(prompt, model=request.model)
+        )
+        path = _payload_path(outdir, request)
+        _materialize_idempotent(path, json.dumps([payload], ensure_ascii=False, indent=2))
+        written += 1
+        print(f"CURATED {path} (target={request.target_id})")
+    print(f"REFACTOR-CANDIDATES: {written} materialised into {outdir}")
+    return 0
 
 
 def _print_load_result(path, result) -> None:
@@ -468,6 +555,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_cur.add_argument("--created-at", required=True, dest="created_at", help="external generation time (ISO-8601)")
     p_cur.add_argument("--out", required=True, help="git-tracked summaries directory to materialise into")
     p_cur.set_defaults(func=_cmd_curate)
+
+    p_rc = sub.add_parser(
+        "refactor-candidates",
+        help="composite facet-3: the recall-side deterministic composite (low-precision "
+        "AND low-locality Java Methods) SELECTS candidates, the isolated producer "
+        "SYNTHESISES a grounded observation per tuple, materialised atomically + "
+        "idempotently to git-SoT (LLM never selects; loading is left to `load`)",
+    )
+    p_rc.add_argument("--generator", required=True, help="the producing tool/agent id (not a person's name — PII; not palimpsest)")
+    p_rc.add_argument("--model", required=True, help="the actual generation model (not palimpsest)")
+    p_rc.add_argument("--created-at", required=True, dest="created_at", help="external generation time (ISO-8601)")
+    p_rc.add_argument("--out", required=True, help="git-tracked summaries directory to materialise into")
+    p_rc.add_argument("--max", type=int, default=25, dest="max", help="max candidates (composite LIMIT + LLM fan-out cap, default 25)")
+    p_rc.set_defaults(func=_cmd_refactor_candidates)
 
     p_rec = sub.add_parser(
         "reconcile",

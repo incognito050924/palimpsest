@@ -1501,3 +1501,137 @@ def recall_callgraph_locality(driver, limit=25):
     if not items:
         gaps.append(_callgraph_locality_reingest_gap())
     return _result(items, gaps, None, [])
+
+
+# ── composite refactor-candidate identifier: facet-1 ∧ facet-2 ────────────────
+# The DETERMINISTIC, provider-free SELECTOR (facet-3 / wi_260714ns9 M1+M3) that
+# COMPOSES the two Relate signals in ONE id-ordered query: per Java caller Method it
+# aggregates BOTH the name-resolution axis (name_resolved CALLS — LOW PRECISION) AND
+# the locality axis (cross-package typed CALLS — LOW LOCALITY), then keeps ONLY the
+# Methods carrying BOTH (``cross > 0 AND name_calls > 0``). This is the SINGLE source
+# of the composite predicate (M2: curate re-implements NONE of it) and a SINGLE
+# id-ordered query — NEVER an intersection of two independently-capped recalls, whose
+# re-run target set would be non-deterministic (M3).
+#
+# Each surviving Method is emitted as an EXTRACTION TARGET tuple for the host-injected
+# LLM producer: ``id`` (target), ``grounding_ids`` (the target plus the callee ids its
+# composite calls reach — the CLOSED citation set), and a NEUTRAL ``facts`` triple
+# (raw cross/same/unresolved/name_calls counts, NO adjectives). The LLM SELECTS
+# NOTHING — the selection IS this deterministic query (F-Q6); the model only
+# synthesises a grounded co-occurrence OBSERVATION over the pre-selected tuple.
+#
+# Reuses the facet-2 aggregation shape verbatim (the ``[:CONTAINS*]`` variable-length
+# Method->Package climb, the resolution marker, the ``.java`` language boundary,
+# branch-scoped ids). Combinatorial only, no LLM. Scalar projections only (never a
+# whole node), so the per-node author cannot leak. ``$lim`` is the SOLE parameter;
+# ``.java`` / ``typed`` / ``name`` are DEV literals, never interpolated.
+_REFACTOR_CANDIDATES = """
+MATCH (caller:Method)-[c:CALLS]->(callee)
+WHERE caller.path ENDS WITH '.java'
+OPTIONAL MATCH (cp:Package)-[:CONTAINS*]->(caller)
+OPTIONAL MATCH (dp:Package)-[:CONTAINS*]->(callee)
+WITH caller, cp, c.resolution AS res, callee,
+     dp.qualified_name AS callee_pkg
+WITH caller, cp,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NOT NULL
+                 AND callee_pkg <> cp.qualified_name THEN 1 END) AS cross,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NOT NULL
+                 AND callee_pkg = cp.qualified_name THEN 1 END) AS same,
+     count(CASE WHEN res = 'typed' AND callee_pkg IS NULL THEN 1 END) AS unresolved,
+     count(CASE WHEN res = 'name' THEN 1 END) AS name_calls,
+     collect(DISTINCT CASE
+         WHEN res = 'name'
+              OR (res = 'typed' AND callee_pkg IS NOT NULL
+                  AND callee_pkg <> cp.qualified_name)
+         THEN callee.id END) AS raw_grounding
+WITH caller, cross, same, unresolved, name_calls,
+     [x IN raw_grounding WHERE x IS NOT NULL] AS grounding
+WHERE cross > 0 AND name_calls > 0
+RETURN caller.id AS id, labels(caller) AS labels, caller.name AS name,
+       caller.qualified_name AS qualified_name,
+       caller.path AS path, caller.start_line AS start_line, caller.end_line AS end_line,
+       caller.source_commit AS source_commit, caller.committed_at AS committed_at,
+       cross, same, unresolved, name_calls, grounding
+ORDER BY id
+LIMIT $lim
+"""
+
+# Standing gap (ac-2 honesty), ALWAYS emitted: a candidate is the CO-OCCURRENCE of two
+# structural facts (a name_resolved CALL AND a cross-package CALL on one Method), NOT a
+# refactor verdict — it is a target for grounded external SYNTHESIS, not a judgment. The
+# facts triple carries raw counts only; any interpretation is the reader's. Completeness
+# is NOT claimed (Methods missing either axis are absent — absence is not a clean bill).
+_REFACTOR_CANDIDATES_GAP = (
+    "a candidate is the grounded CO-OCCURRENCE of two structural facts — a "
+    "name-resolved (low-precision) CALL AND a cross-package (low-locality) CALL on one "
+    "Method — surfaced as a target for external grounded synthesis, NOT a refactor "
+    "verdict or quality judgment; the facts triple is raw counts only. Methods carrying "
+    "just one axis are absent (absence is not a clean bill). Completeness is NOT claimed"
+)
+
+
+def _refactor_candidates_absent_gap() -> str:
+    """The DISTINCT empty-result advisory: an empty composite is AMBIGUOUS — it can mean
+    the two axes genuinely never co-occur on one Method on a resolved corpus (the
+    documented current state — per-edge precision leaves few/no name-resolved CALLS) OR
+    a graph that PREDATES the CALLS + resolution + Package CONTAINS spine this reads.
+    Emitting this on empty stops an empty from reading as a false 'no such coupling' —
+    mirrors :func:`_callgraph_locality_reingest_gap`."""
+    return (
+        "no Method carries BOTH a name-resolved CALL and a cross-package CALL; this "
+        "empty is ambiguous — on a PRECISION-RESOLVED corpus name-resolved CALLS are "
+        "few or absent so the two axes rarely co-occur (the marker for this composite "
+        "may be structurally ABSENT), OR the graph PREDATES the CALLS + resolution + "
+        "Package CONTAINS spine — re-ingest before reading this as 'no such coupling'"
+    )
+
+
+def _candidate_facts(rec) -> str:
+    """The NEUTRAL facts triple for the producer: raw counts + resolution marker, NO
+    adjectives (F-Q6 framing — the model synthesises an observation, it is not handed a
+    verdict). Deterministic string of the aggregated counts."""
+    return (
+        f"typed_cross_package_calls={rec['cross']}; "
+        f"typed_same_package_calls={rec['same']}; "
+        f"typed_unresolved_calls={rec['unresolved']}; "
+        f"name_resolved_calls={rec['name_calls']}"
+    )
+
+
+def recall_refactor_candidates(driver, limit=25):
+    """Identify composite refactor CANDIDATES — Java Methods carrying BOTH the
+    low-precision (name_resolved CALLS) AND low-locality (cross-package CALLS) axes —
+    and emit each as a grounded EXTRACTION TARGET for the host-injected LLM producer
+    (facet-3 / wi_260714ns9 M1+M3).
+
+    A SEPARATE, global read-only entry point that COMPOSES the two Relate signals in a
+    SINGLE deterministic, provider-free, id-ordered query (never an intersection of two
+    capped recalls). Per surviving Method it returns the standard result shape whose
+    items each additionally carry ``grounding_ids`` (the target plus the callee ids its
+    composite calls reach — the closed citation set the producer grounds in) and a
+    NEUTRAL ``facts`` triple (raw cross/same/unresolved/name_calls counts, no
+    adjectives). The LLM SELECTS nothing — the selection IS this query (F-Q6). Each item
+    is the grounded CALLER (commit + file:line via :func:`_sources`, author-omitted —
+    scalar projections only). NO content-verdict field. Combinatorial only, no LLM.
+
+    Gaps (ac-2 honesty): the standing gap is ALWAYS present (co-occurrence-not-verdict,
+    completeness never claimed); on an EMPTY result a DISTINCT absent/predate advisory is
+    added so an empty composite is not mistaken for 'no such coupling' — on a
+    precision-resolved corpus the composite is legitimately empty (documented vacuity),
+    which is distinct from a graph predating the spine."""
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_REFACTOR_CANDIDATES, lim=limit)]
+    items = []
+    for rec in rows:
+        it = _item(rec, CALLS, 1)
+        it["grounding_ids"] = (rec["id"], *rec["grounding"])
+        it["facts"] = _candidate_facts(rec)
+        it["cross"] = rec["cross"]
+        it["same"] = rec["same"]
+        it["unresolved"] = rec["unresolved"]
+        it["name_calls"] = rec["name_calls"]
+        items.append(it)
+    gaps = [_REFACTOR_CANDIDATES_GAP]
+    if not items:
+        gaps.append(_refactor_candidates_absent_gap())
+    return _result(items, gaps, None, [])
