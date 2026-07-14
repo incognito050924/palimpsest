@@ -1268,3 +1268,99 @@ def recall_test_impact(driver, method_id, depth=10, limit=25):
     if not items:
         gaps.append(_test_impact_reingest_gap(seed["id"]))
     return _result(items, gaps, None, [])
+
+
+# ── edge-precision: the resolution='name' recall channel ──────────────────────
+# "Which Java references did the extractor resolve by NAME (not by type)?" A
+# dedicated, global read-only entry point that CONSUMES the per-edge
+# ``resolution`` marker (Edge.resolution, projected onto CALLS / DEPENDS_ON in
+# kg/ingest.py) and surfaces the name-resolved edges as its own grounded channel.
+# Detect-only: it re-uses the existing marker, never re-derives precision. Mirrors
+# the sibling MODIFIES channels (recall_churn / recall_cochange): SEPARATE global
+# entry point, standard result shape, uncapped (no fan-out cap — a whole-graph
+# scan bounded only by ``limit``, exactly like recall_churn).
+
+# CALLS / DEPENDS_ON edges the extractor stamped ``resolution='name'`` whose SOURCE
+# endpoint lives in a ``.java`` file. Only SCALAR projections (``AS`` columns) are
+# returned — never a whole node — so the per-node author (stamped on every Method /
+# Class) cannot leak. ``$lim`` is the sole parameter (server-side LIMIT after a total
+# ORDER BY, rebuild-deterministic); ``.java`` / ``name`` are DEV literals baked into
+# the query text (trusted constants, not caller input), so no untrusted value is ever
+# interpolated. ``type(r)`` distinguishes CALLS from DEPENDS_ON per row.
+_EDGE_PRECISION = """
+MATCH (a)-[r:CALLS|DEPENDS_ON]->(b)
+WHERE r.resolution = 'name' AND a.path ENDS WITH '.java'
+RETURN a.id AS id, labels(a) AS labels, a.name AS name,
+       a.qualified_name AS qualified_name,
+       a.path AS path, a.start_line AS start_line, a.end_line AS end_line,
+       a.source_commit AS source_commit, a.committed_at AS committed_at,
+       type(r) AS relation_type, r.resolution AS resolution, b.id AS dst
+ORDER BY id, relation_type, dst
+LIMIT $lim
+"""
+
+# Standing gap (ac-2 honesty), ALWAYS emitted: name-resolution is a LOW-PRECISION
+# marker, NOT a defect verdict, and the two relation kinds mean different things. A
+# Java DEPENDS_ON is STRUCTURALLY always resolution='name' (the extractor never
+# type-resolves import targets — see extract/java.py), so those flags are the norm,
+# not a finding; a CALLS resolution='name' is a MEANINGFUL name-fallback (the callee
+# could not be bound to a typed Method). Completeness is NOT claimed — only edges the
+# extractor stamped are flagged, not every imprecise reference.
+_EDGE_PRECISION_GAP = (
+    "resolution='name' is a LOW-PRECISION marker, not a quality verdict: a Java "
+    "DEPENDS_ON is STRUCTURALLY always resolution='name' (import targets are never "
+    "type-resolved), so those flags are the norm; a CALLS resolution='name' is a "
+    "meaningful name-fallback (the callee could not be bound to a typed Method). "
+    "Completeness is NOT claimed — only edges the extractor stamped are flagged"
+)
+
+
+def _edge_precision_reingest_gap() -> str:
+    """The DISTINCT empty-result advisory: an exact ``resolution='name'`` match is
+    empty BOTH when the graph is genuinely clean AND when it PREDATES the per-edge
+    resolution marker (its CALLS / DEPENDS_ON edges carry no resolution property at
+    all). Emitting this on empty stops a predate-empty from reading as a false
+    all-clear — mirrors :func:`_test_impact_reingest_gap`."""
+    return (
+        "no resolution='name' edge found on any .java endpoint; if unexpected, the "
+        "graph may PREDATE the per-edge resolution marker (its CALLS / DEPENDS_ON "
+        "edges carry no resolution property, so an exact resolution='name' match is "
+        "empty) — re-ingest to populate resolution before reading this as 'no "
+        "low-precision edges'"
+    )
+
+
+def recall_edge_precision(driver, limit=25):
+    """Recall the name-resolved (low-precision) Java edges — the ``resolution='name'``
+    channel.
+
+    A SEPARATE, global read-only entry point that CONSUMES the per-edge
+    ``resolution`` marker (never re-derives it). MATCHes CALLS / DEPENDS_ON edges
+    stamped ``resolution='name'`` whose source endpoint is a ``.java`` node,
+    id-ordered before a server-side ``LIMIT $lim`` (rebuild-deterministic) with
+    ``$lim`` the sole parameter — ``.java`` / ``name`` are dev literals, never
+    interpolated caller input. Each item is the grounded SOURCE endpoint (commit +
+    file:line via :func:`_sources`, author-omitted — never a whole-node projection)
+    carrying its ``relation`` kind (CALLS vs DEPENDS_ON, so the structurally-always-low
+    DEPENDS_ON is distinguishable from a meaningful CALLS name-fallback) and its
+    ``resolution``. NO content-verdict field — this is a grounded observation, not a
+    quality judgment; ``confidence`` is the deterministic grounding-coverage share
+    (:func:`_confidence`). Combinatorial only (one scan + dict building), no LLM.
+
+    Gaps (ac-2 / ac-3 honesty): the low-precision note is ALWAYS present (completeness
+    never claimed, DEPENDS_ON-vs-CALLS distinguished); on an EMPTY result a DISTINCT
+    re-ingest advisory is added so a graph predating the resolution marker is not
+    mistaken for a clean 'no low-precision edges'.
+    """
+    with driver.session() as session:
+        rows = [r.data() for r in session.run(_EDGE_PRECISION, lim=limit)]
+    items = []
+    for rec in rows:
+        it = _item(rec, rec["relation_type"], 1)
+        it["resolution"] = rec["resolution"]
+        it["dst"] = rec["dst"]
+        items.append(it)
+    gaps = [_EDGE_PRECISION_GAP]
+    if not items:
+        gaps.append(_edge_precision_reingest_gap())
+    return _result(items, gaps, None, [])

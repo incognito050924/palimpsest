@@ -55,6 +55,7 @@ from palimpsest.recall import (
     recall_churn,
     recall_cochange,
     recall_test_impact,
+    recall_edge_precision,
 )
 from palimpsest.recall.graphrag import reconcile_recall
 from palimpsest.reconcile import capture
@@ -128,6 +129,14 @@ def _cmd_test_impact(args) -> None:
             driver, args.method_id, depth=args.depth, limit=args.limit
         )
     _print_test_impact(args.method_id, args.depth, args.limit, result)
+
+
+def _cmd_edge_precision(args) -> None:
+    with _driver() as driver:
+        result = recall_edge_precision(driver, limit=args.limit)
+    # The shared channel printer: ``resolution`` is the per-item field it prints,
+    # so each low-precision edge shows ``[resolution=name]`` beside its grounding.
+    _print_channel("EDGE-PRECISION", "resolution", result, args.limit)
 
 
 def _cmd_query(args) -> None:
@@ -489,6 +498,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_ti.add_argument("--depth", type=int, default=10, help="transitive-hop ceiling (default 10)")
     p_ti.add_argument("--limit", type=int, default=25, help="max test callers (default 25)")
     p_ti.set_defaults(func=_cmd_test_impact)
+
+    p_ep = sub.add_parser(
+        "edge-precision",
+        help="name-resolved (low-precision) Java CALLS / DEPENDS_ON edges (resolution='name')",
+    )
+    p_ep.add_argument("--limit", type=int, default=25, help="max flagged edges (default 25)")
+    p_ep.set_defaults(func=_cmd_edge_precision)
     return parser
 
 
